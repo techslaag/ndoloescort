@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useNotificationStore } from '../../stores/notification'
 import NotificationDropdown from './NotificationDropdown.vue'
@@ -10,6 +10,7 @@ const notificationStore = useNotificationStore()
 // State
 const showDropdown = ref(false)
 const bellRef = ref<HTMLDivElement>()
+const audioRef = ref<HTMLAudioElement>()
 
 // Computed
 const hasUnread = computed(() => notificationStore.unreadCount > 0)
@@ -21,6 +22,9 @@ const displayCount = computed(() => {
 // Methods
 const toggleDropdown = () => {
   showDropdown.value = !showDropdown.value
+  if (showDropdown.value && hasUnread.value) {
+    playNotificationSound()
+  }
 }
 
 const closeDropdown = () => {
@@ -37,6 +41,35 @@ const goToNotifications = () => {
   router.push('/notifications')
   closeDropdown()
 }
+
+const playNotificationSound = () => {
+  if (audioRef.value) {
+    audioRef.value.volume = 0.3
+    audioRef.value.play().catch(() => {
+      // Ignore audio play errors (e.g., user hasn't interacted with page yet)
+    })
+  }
+}
+
+// Vibration feedback for mobile devices
+const triggerVibration = () => {
+  if ('vibrate' in navigator) {
+    navigator.vibrate([50, 30, 50])
+  }
+}
+
+// Watch for new notifications
+let previousCount = notificationStore.unreadCount
+watch(
+  () => notificationStore.unreadCount,
+  (newCount) => {
+    if (newCount > previousCount) {
+      playNotificationSound()
+      triggerVibration()
+    }
+    previousCount = newCount
+  }
+)
 
 // Lifecycle
 onMounted(() => {
@@ -103,64 +136,98 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   border: none;
-  background: none;
+  background: rgba(255, 255, 255, 0.1);
   cursor: pointer;
-  border-radius: 50%;
-  transition: all 0.2s ease;
+  border-radius: 12px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid transparent;
   
   &:hover {
-    background: rgba(0, 0, 0, 0.05);
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px);
+    
+    .bell-icon {
+      transform: rotate(-5deg);
+    }
+  }
+  
+  &:active {
+    transform: translateY(0);
+    background: rgba(255, 255, 255, 0.2);
   }
   
   &.has-unread {
+    animation: subtle-glow 2s ease-in-out infinite;
+    
     .bell-icon {
-      animation: ring 1s ease-in-out;
+      animation: ring 4s ease-in-out infinite;
+    }
+  }
+  
+  // Context styling within header
+  .site-header & {
+    background: rgba(255, 255, 255, 0.1);
+    
+    &:hover {
+      background: rgba(255, 255, 255, 0.15);
     }
   }
 }
 
 .bell-icon {
-  width: 24px;
-  height: 24px;
-  color: #374151;
-  transition: color 0.2s ease;
+  width: 20px;
+  height: 20px;
+  color: white;
+  transition: all 0.3s ease;
+  
+  .site-header & {
+    color: white;
+  }
   
   .bell-button:hover & {
-    color: #111827;
+    color: var(--color-accent);
   }
 }
 
 .notification-badge {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
-  background: #ef4444;
+  top: -4px;
+  right: -4px;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
   color: white;
   font-size: 11px;
-  font-weight: 600;
-  border-radius: 9px;
+  font-weight: 700;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 2px solid white;
+  border: 2.5px solid;
+  border-color: var(--color-background-dark);
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.4);
+  animation: badge-pop 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  
+  .site-header & {
+    border-color: rgba(18, 0, 36, 0.9);
+  }
 }
 
 .pulse-ring {
   position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 18px;
-  height: 18px;
+  top: -4px;
+  right: -4px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: #ef4444;
   opacity: 0.5;
-  animation: pulse-ring 1.5s ease-in-out infinite;
+  animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   pointer-events: none;
 }
 
@@ -169,13 +236,19 @@ onUnmounted(() => {
   0%, 100% {
     transform: rotate(0deg);
   }
-  10%, 30% {
+  5% {
+    transform: rotate(-15deg);
+  }
+  10% {
+    transform: rotate(15deg);
+  }
+  15% {
     transform: rotate(-10deg);
   }
-  20%, 40% {
+  20% {
     transform: rotate(10deg);
   }
-  50% {
+  25% {
     transform: rotate(0deg);
   }
 }
@@ -185,9 +258,34 @@ onUnmounted(() => {
     transform: scale(1);
     opacity: 0.5;
   }
+  50% {
+    transform: scale(1.8);
+    opacity: 0.2;
+  }
   100% {
-    transform: scale(1.5);
+    transform: scale(2.5);
     opacity: 0;
+  }
+}
+
+@keyframes badge-pop {
+  0% {
+    transform: scale(0);
+  }
+  50% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes subtle-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+  50% {
+    box-shadow: 0 0 20px 2px rgba(239, 68, 68, 0.2);
   }
 }
 

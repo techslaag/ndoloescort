@@ -2,13 +2,15 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import { useLocationStore } from '../../stores/location'
 import { useLogout } from '../../composables/useLogout'
-import LocationSelector from '../LocationSelector.vue'
+import LocationModal from '../LocationModal.vue'
 import NotificationBell from '../notifications/NotificationBell.vue'
 import { useNotificationStore } from '../../stores/notification'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const locationStore = useLocationStore()
 const notificationStore = useNotificationStore()
 const { performLogout } = useLogout()
 
@@ -16,6 +18,8 @@ const isMenuOpen = ref(false)
 const isScrolled = ref(false)
 const isLoggingOut = ref(false)
 const isUserDropdownOpen = ref(false)
+const isLocationModalOpen = ref(false)
+const locationModalRef = ref()
 
 const toggleMenu = () => {
   isMenuOpen.value = !isMenuOpen.value
@@ -44,6 +48,17 @@ const navigateTo = (path: string) => {
   router.push(path)
   closeMenu()
   closeUserDropdown()
+}
+
+const openLocationModal = () => {
+  if (locationModalRef.value) {
+    locationModalRef.value.openModal()
+  }
+}
+
+const closeLocationModal = () => {
+  isLocationModalOpen.value = false
+  document.body.style.overflow = ''
 }
 
 const handleLogout = async () => {
@@ -100,6 +115,13 @@ const handleTouchStart = (event: TouchEvent) => {
       closeUserDropdown()
     }
   }
+  // Close location modal when touching outside
+  if (isLocationModalOpen.value && event.target) {
+    const target = event.target as Element
+    if (!target.closest('.location-modal') && !target.closest('.mobile-location-button')) {
+      closeLocationModal()
+    }
+  }
 }
 
 // Handle click events for closing dropdowns
@@ -129,6 +151,8 @@ onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   // Clean up body overflow
   document.body.style.overflow = ''
+  // Clean up modal state
+  isLocationModalOpen.value = false
 })
 </script>
 
@@ -176,7 +200,13 @@ onUnmounted(() => {
           <!-- <li v-if="isEscort"><a @click="navigateTo('/escort/profiles')" class="nav-link">My Profiles</a></li> -->
         </ul>
         <div class="mobile-location">
-          <LocationSelector />
+          <div class="location-selector" @click="openLocationModal">
+            <span class="location-icon">📍</span>
+            <span class="location-text">
+              {{ locationStore.currentLocation ? `${locationStore.currentLocation.flag} ${locationStore.currentLocation.name}` : 'Select Location' }}
+            </span>
+            <span class="location-arrow">▼</span>
+          </div>
         </div>
         
         <div class="nav-buttons">
@@ -260,6 +290,10 @@ onUnmounted(() => {
         @click="closeMenu"
         @touchstart="closeMenu"
       ></div>
+
+      
+      <!-- LocationModal component -->
+      <LocationModal ref="locationModalRef" />
     </div>
   </header>
 </template>
@@ -304,6 +338,54 @@ onUnmounted(() => {
   .logo-accent {
     color: var(--color-accent);
     margin-left: 0.25rem;
+  }
+}
+
+// Location Selector Styles
+.location-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--border-radius-lg);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+  
+  .location-icon {
+    font-size: 1.1rem;
+  }
+  
+  .location-text {
+    color: white;
+    font-weight: 500;
+    font-size: 0.95rem;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  
+  .location-arrow {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.75rem;
+    margin-left: 0.25rem;
+  }
+}
+
+// Desktop location selector - only visible on desktop
+.desktop-location-selector {
+  margin-left: auto;
+  margin-right: 2rem;
+  
+  @media (max-width: 992px) {
+    display: none;
   }
 }
 
@@ -576,6 +658,156 @@ onUnmounted(() => {
       color: var(--color-text-light);
       transition: color 0.2s ease;
     }
+  }
+}
+
+// Mobile location button styles
+.mobile-location-button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 1rem 2rem;
+  background: transparent;
+  border: none;
+  color: white;
+  font-size: 1.1rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  transition: all 0.3s ease;
+  
+  &:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: var(--color-accent);
+  }
+  
+  &:active {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+  
+  .location-icon {
+    font-size: 1.2rem;
+  }
+  
+  svg {
+    margin-left: auto;
+  }
+}
+
+// Location modal styles
+.location-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  animation: fadeIn 0.2s ease;
+}
+
+.location-modal {
+  background: var(--color-background-dark);
+  border-radius: var(--border-radius-lg);
+  width: 100%;
+  max-width: 400px;
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  animation: slideUp 0.3s ease;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  
+  h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: white;
+  }
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  color: white;
+  cursor: pointer;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  
+  &:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  
+  &:active {
+    background: rgba(255, 255, 255, 0.2);
+  }
+}
+
+.modal-content {
+  padding: 1rem;
+  
+  // Override LocationSelector styles for modal
+  :deep(.location-selector) {
+    width: 100%;
+    
+    .location-button {
+      width: 100%;
+      background: var(--color-background);
+      border-color: var(--color-text-lighter);
+      
+      &:hover {
+        background: var(--color-background-alt);
+      }
+    }
+    
+    .location-dropdown {
+      position: static;
+      margin-top: 1rem;
+      box-shadow: none;
+      border: 1px solid var(--color-text-lighter);
+      animation: none;
+    }
+    
+    .dropdown-overlay {
+      display: none;
+    }
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
