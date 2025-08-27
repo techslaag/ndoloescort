@@ -1,0 +1,32 @@
+{
+  "name": "elite-escort-services",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@types/crypto-js": "^4.2.2",
+    "agora-rtc-sdk-ng": "^4.24.0",
+    "appwrite": "^18.2.0",
+    "axios": "^1.6.2",
+    "chart.js": "^4.5.0",
+    "crypto-js": "^4.2.0",
+    "pinia": "^2.1.7",
+    "pinia-plugin-persistedstate": "^4.4.1",
+    "vue": "^3.4.38",
+    "vue-chartjs": "^5.3.2",
+    "vue-router": "^4.2.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.3",
+    "sass": "^1.69.5",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.2",
+    "vue-tsc": "^2.1.4"
+  },
+  "packageManager": "yarn@1.22.22+sha1.ac34549e6aa8e7ead463a7407e1c7390f61a6610"
+}

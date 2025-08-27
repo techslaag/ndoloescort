@@ -1,0 +1,9 @@
+{
+  "name": "mark-message-as-read",
+  "version": "1.0.0",
+  "description": "Mark a message as read if user is the receiver",
+  "main": "index.js",
+  "dependencies": {
+    "node-appwrite": "^11.0.0"
+  }
+}
