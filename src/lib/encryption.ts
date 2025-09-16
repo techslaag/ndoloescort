@@ -1,11 +1,18 @@
 import CryptoJS from 'crypto-js'
 
 // Generate a secure encryption key
-// In production, this should be stored in environment variables
+// SECURITY WARNING: This key should be stored in environment variables
 const generateEncryptionKey = (): string => {
-  // Use a combination of browser fingerprint and a secret
+  // Check for environment variable first
+  const envKey = import.meta.env.VITE_ENCRYPTION_KEY
+  if (envKey) {
+    return envKey
+  }
+  
+  // Fallback to generated key (not recommended for production)
+  console.warn('SECURITY WARNING: Using generated encryption key. Set VITE_ENCRYPTION_KEY in your environment variables.')
   const browserFingerprint = navigator.userAgent + navigator.language + screen.width + screen.height
-  const secret = 'ndolo-escorts-secret-key-2024'
+  const secret = 'ndolo-escorts-secret-key-2024' // TODO: Remove this hardcoded value
   return CryptoJS.SHA256(browserFingerprint + secret).toString()
 }
 

@@ -8,6 +8,8 @@ import AgeConfirmation from './components/AgeConfirmation.vue'
 import LocationConfirmation from './components/LocationConfirmation.vue'
 import AuthLayout from './layouts/AuthLayout.vue'
 import DefaultLayout from './layouts/DefaultLayout.vue'
+import ToastContainer from './components/ToastContainer.vue'
+import SessionWarningModal from './components/modals/SessionWarningModal.vue'
 
 const isLoading = ref(true)
 const ageConfirmed = ref(false)
@@ -21,7 +23,7 @@ useSessionMonitor()
 
 // Determine if current route is an auth route
 const isAuthRoute = computed(() => {
-  const authRoutes = ['Login', 'Signup', 'ForgotPassword', 'ResetPassword']
+  const authRoutes = ['Login', 'Signup', 'ForgotPassword', 'ResetPassword', 'VerificationCode']
   return authRoutes.includes(route.name as string)
 })
 
@@ -91,6 +93,12 @@ const onLocationConfirmed = () => {
         </router-view>
       </DefaultLayout>
     </template>
+    
+    <!-- Toast Container -->
+    <ToastContainer />
+    
+    <!-- Session Warning Modal -->
+    <SessionWarningModal v-if="authStore.isAuthenticated" />
   </div>
 </template>
 

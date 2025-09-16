@@ -10,42 +10,67 @@ import {
   MEDIA_BUCKET_ID
 } from '../lib/appwrite'
 import { ID, Query } from 'appwrite'
+import { handleAppwriteError } from '../utils/appwriteErrors'
+import { validateProfileCompletion, canPublishProfile } from '../utils/profileValidation'
 import type { EscortProfile, Service, PricingOption, MediaFile, CalendarEvent } from '../types/profile'
 
 export class ProfileService {
   // Profile CRUD operations
   async createProfile(userId: string, profileData: any): Promise<any> {
     try {
+      const documentData = {
+        userId,
+        ...profileData,
+        // Set default values for stats
+        statsViews: 0,
+        statsBookings: 0,
+        statsRating: 0,
+        statsReviewCount: 0,
+        // Set default verification status
+        verificationIsVerified: false,
+        verificationIdVerified: false,
+        verificationPhotoVerified: false,
+        status: 'draft',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }
+      
+      console.log('ProfileService.createProfile - Creating document with data:', documentData)
+      console.log('ProfileService.createProfile - Collection ID:', PROFILES_COLLECTION_ID)
+      console.log('ProfileService.createProfile - Database ID:', DATABASE_ID)
+      
+      // Ensure we're using the correct collection ID
+      const collectionId = '6890e0b10016147d8374' // PROFILES_COLLECTION_ID
+      const databaseId = '6890df67000788c3e8f6' // DATABASE_ID
+      
+      console.log('Using explicit collection ID:', collectionId)
+      
       const profile = await databases.createDocument(
-        DATABASE_ID,
-        PROFILES_COLLECTION_ID,
+        databaseId,
+        collectionId,
         ID.unique(),
-        {
-          userId,
-          ...profileData,
-          // Set default values for stats
-          statsViews: 0,
-          statsBookings: 0,
-          statsRating: 0,
-          statsReviewCount: 0,
-          // Set default verification status
-          verificationIsVerified: false,
-          verificationIdVerified: false,
-          verificationPhotoVerified: false,
-          status: 'draft',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString()
-        }
+        documentData
       )
       return profile
     } catch (error) {
       console.error('Error creating profile:', error)
-      throw error
+      throw new Error(handleAppwriteError(error, 'createProfile'))
     }
   }
 
   async updateProfile(profileId: string, updates: Partial<EscortProfile>): Promise<EscortProfile> {
     try {
+      // If trying to activate profile, validate it first
+      if (updates.status === 'active') {
+        const currentProfile = await this.getProfile(profileId)
+        const mergedProfile = { ...currentProfile, ...updates }
+        const { canPublish, reason } = canPublishProfile(mergedProfile)
+        
+        if (!canPublish) {
+          throw new Error(`Cannot activate profile: ${reason}`)
+        }
+      }
+      
       const profile = await databases.updateDocument(
         DATABASE_ID,
         PROFILES_COLLECTION_ID,
@@ -58,7 +83,7 @@ export class ProfileService {
       return profile as unknown as EscortProfile
     } catch (error) {
       console.error('Error updating profile:', error)
-      throw error
+      throw new Error(handleAppwriteError(error, 'updateProfile'))
     }
   }
 
@@ -115,7 +140,7 @@ export class ProfileService {
       return completeProfile as unknown as EscortProfile
     } catch (error) {
       console.error('Error getting profile:', error)
-      throw error
+      throw new Error(handleAppwriteError(error, 'getProfile'))
     }
   }
 
@@ -157,7 +182,7 @@ export class ProfileService {
       return completeProfiles as unknown as EscortProfile[]
     } catch (error) {
       console.error('Error getting user profiles:', error)
-      throw error
+      throw new Error(handleAppwriteError(error, 'getUserProfiles'))
     }
   }
 
@@ -451,14 +476,58 @@ export class ProfileService {
     }
   }
 
+  // Profile validation
+  async validateProfile(profileId: string) {
+    try {
+      const profile = await this.getProfile(profileId)
+      return validateProfileCompletion(profile)
+    } catch (error) {
+      console.error('Error validating profile:', error)
+      throw new Error(handleAppwriteError(error, 'validateProfile'))
+    }
+  }
+
+  // Activate profile with validation
+  async activateProfile(profileId: string): Promise<EscortProfile> {
+    try {
+      const profile = await this.getProfile(profileId)
+      const { canPublish, reason } = canPublishProfile(profile)
+      
+      if (!canPublish) {
+        throw new Error(reason || 'Profile cannot be activated')
+      }
+      
+      return await this.updateProfile(profileId, { status: 'active' })
+    } catch (error) {
+      console.error('Error activating profile:', error)
+      throw error
+    }
+  }
+
   // Delete profile and all related documents
-  async deleteProfile(profileId: string): Promise<void> {
+  async deleteProfile(profileId: string): Promise<{ success: boolean; message: string }> {
     try {
       console.log('ProfileService.deleteProfile called with:', {
         profileId,
         DATABASE_ID,
         PROFILES_COLLECTION_ID
       })
+      
+      // First verify the profile exists
+      try {
+        const profile = await databases.getDocument(
+          DATABASE_ID,
+          PROFILES_COLLECTION_ID,
+          profileId
+        )
+        console.log('Profile found:', profile)
+      } catch (error: any) {
+        console.error('Profile not found or error accessing:', error)
+        if (error.code === 404) {
+          throw new Error('Profile not found')
+        }
+        throw error
+      }
       
       // First, get all related documents before deleting the profile
       
@@ -557,13 +626,33 @@ export class ProfileService {
       }
       
       // 5. Finally, delete the profile document itself
-      const result = await databases.deleteDocument(
-        DATABASE_ID,
-        PROFILES_COLLECTION_ID,
-        profileId
-      )
+      console.log('Attempting to delete profile document...')
+      console.log('Using:', { DATABASE_ID, PROFILES_COLLECTION_ID, profileId })
+      
+      try {
+        const result = await databases.deleteDocument(
+          DATABASE_ID,
+          PROFILES_COLLECTION_ID,
+          profileId
+        )
+        console.log('Delete document result:', result)
+      } catch (deleteError: any) {
+        console.error('Error deleting profile document:', deleteError)
+        console.error('Delete error details:', {
+          message: deleteError.message,
+          code: deleteError.code,
+          type: deleteError.type,
+          response: deleteError.response
+        })
+        throw deleteError
+      }
       
       console.log('Profile and all related documents deleted successfully')
+      
+      return {
+        success: true,
+        message: 'Profile and all related documents deleted successfully'
+      }
       
     } catch (error: any) {
       console.error('Error deleting profile:', error)

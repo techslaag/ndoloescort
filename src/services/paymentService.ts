@@ -1,5 +1,6 @@
 import { databases, DATABASE_ID, functions, PAYMENTS_COLLECTION_ID } from '../lib/appwrite'
 import { ID, Query } from 'appwrite'
+import { flutterwaveService } from './flutterwaveService'
 
 export interface PaymentMethod {
   id: string
@@ -43,10 +44,9 @@ export interface PaymentIntent {
 }
 
 export class PaymentService {
-  // Initialize payment processor (Stripe, PayPal, etc.)
+  // Initialize payment processor - Now using Flutterwave
   private async initializeProcessor() {
-    // This would initialize your chosen payment processor
-    // For demo purposes, we'll simulate payment processing
+    // Flutterwave is initialized in flutterwaveService
     return true
   }
 
@@ -84,10 +84,10 @@ export class PaymentService {
     }
   }
 
-  // Process payment
+  // Process payment with Flutterwave
   async processPayment(
     transactionId: string,
-    paymentMethodId: string
+    paymentResponse: any
   ): Promise<Transaction> {
     try {
       // Get the transaction
@@ -97,36 +97,10 @@ export class PaymentService {
         transactionId
       )
 
-      // Update status to processing
-      await databases.updateDocument(
-        DATABASE_ID,
-        PAYMENTS_COLLECTION_ID,
+      // Update with Flutterwave response
+      const updatedTransaction = await flutterwaveService.updatePaymentRecord(
         transactionId,
-        {
-          status: 'processing',
-          paymentMethod: paymentMethodId,
-          updatedAt: new Date().toISOString()
-        }
-      )
-
-      // In production, process the payment with your processor
-      // For demo, we'll simulate a successful payment after a delay
-      await new Promise(resolve => setTimeout(resolve, 2000))
-
-      // Update status to completed
-      const updatedTransaction = await databases.updateDocument(
-        DATABASE_ID,
-        PAYMENTS_COLLECTION_ID,
-        transactionId,
-        {
-          status: 'completed',
-          processorTransactionId: `sim_${ID.unique()}`,
-          processorResponse: JSON.stringify({ 
-            success: true, 
-            timestamp: new Date().toISOString() 
-          }),
-          updatedAt: new Date().toISOString()
-        }
+        paymentResponse
       )
 
       // Trigger a function to handle post-payment actions
@@ -162,19 +136,9 @@ export class PaymentService {
   // Get user's payment methods
   async getPaymentMethods(userId: string): Promise<PaymentMethod[]> {
     try {
-      // In production, this would fetch from your payment processor
-      // For demo, we'll return mock data
-      return [
-        {
-          id: 'pm_demo_1',
-          userId,
-          type: 'card',
-          last4: '4242',
-          brand: 'Visa',
-          isDefault: true,
-          createdAt: new Date().toISOString()
-        }
-      ]
+      // Flutterwave handles payment methods during checkout
+      // We don't store payment methods for security
+      return []
     } catch (error) {
       console.error('Error fetching payment methods:', error)
       return []
@@ -254,7 +218,7 @@ export class PaymentService {
     return amount - platformFee
   }
 
-  // Process refund
+  // Process refund with Flutterwave
   async processRefund(
     transactionId: string,
     amount?: number,
@@ -267,27 +231,11 @@ export class PaymentService {
         throw new Error('Can only refund completed transactions')
       }
 
-      const refundAmount = amount || transaction.amount
-
-      // In production, process refund with your processor
-      // For demo, we'll simulate a refund
-      const updatedTransaction = await databases.updateDocument(
-        DATABASE_ID,
-        PAYMENTS_COLLECTION_ID,
-        transactionId,
-        {
-          status: 'refunded',
-          metadata: JSON.stringify({
-            ...JSON.parse(transaction.metadata || '{}'),
-            refundAmount,
-            refundReason: reason,
-            refundedAt: new Date().toISOString()
-          }),
-          updatedAt: new Date().toISOString()
-        }
-      )
-
-      return updatedTransaction as unknown as Transaction
+      // Process refund through Flutterwave
+      await flutterwaveService.processRefund(transactionId, amount)
+      
+      // Get updated transaction
+      return await this.getTransaction(transactionId)
     } catch (error) {
       console.error('Error processing refund:', error)
       throw error

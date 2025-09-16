@@ -506,6 +506,14 @@ class RealtimeService {
     this.subscribeToCalls()
   }
 
+  // Generic subscribe method for other services
+  subscribe(channel: string, callback: RealtimeCallback): UnsubscribeFunction {
+    const unsubscribe = client.subscribe(channel, callback)
+    const subscriptionKey = `generic-${Date.now()}`
+    this.subscriptions.set(subscriptionKey, unsubscribe)
+    return unsubscribe
+  }
+
   // Get connection status
   getConnectionStatus(): boolean {
     return this.isConnected

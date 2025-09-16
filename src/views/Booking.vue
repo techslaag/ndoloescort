@@ -4,7 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useProfileStore } from '../stores/profile'
 import { paymentService } from '../services/paymentService'
-import PaymentForm from '../components/payment/PaymentForm.vue'
+import { flutterwaveService } from '../services/flutterwaveService'
+import FlutterwavePayment from '../components/payment/FlutterwavePayment.vue'
 import ErrorAlert from '../components/ErrorAlert.vue'
 
 const route = useRoute()
@@ -24,6 +25,8 @@ const specialRequests = ref('')
 const showPayment = ref(false)
 const bookingConfirmed = ref(false)
 const error = ref('')
+const bookingId = ref<string>('')
+const paymentRef = ref<InstanceType<typeof FlutterwavePayment>>()
 
 const availableTimes = ref([
   '10:00', '11:00', '12:00', '13:00', '14:00', '15:00',
@@ -112,7 +115,7 @@ const validateBooking = () => {
   return true
 }
 
-const proceedToPayment = () => {
+const proceedToPayment = async () => {
   if (!authStore.isAuthenticated) {
     router.push('/login')
     return
@@ -120,39 +123,59 @@ const proceedToPayment = () => {
   
   if (validateBooking()) {
     error.value = ''
-    showPayment.value = true
+    
+    // Create booking record first
+    try {
+      const booking = {
+        escortId: profileId,
+        clientId: authStore.user?.$id,
+        service: selectedServiceDetails.value,
+        date: selectedDate.value,
+        time: selectedTime.value,
+        duration: duration.value,
+        location: location.value,
+        specialRequests: specialRequests.value,
+        totalCost: totalCost.value,
+        status: 'pending',
+        createdAt: new Date().toISOString()
+      }
+      
+      // In production, save booking to database and get ID
+      bookingId.value = `booking_${Date.now()}`
+      
+      showPayment.value = true
+    } catch (err: any) {
+      error.value = err.message || 'Failed to initialize booking'
+    }
   }
 }
 
-const handlePaymentSuccess = async (paymentData: any) => {
+const handlePaymentSuccess = async (response: any) => {
   try {
-    // Create booking record
-    const booking = {
-      escortId: profileId,
-      clientId: authStore.user?.$id,
-      service: selectedServiceDetails.value,
-      date: selectedDate.value,
-      time: selectedTime.value,
-      duration: duration.value,
-      location: location.value,
-      specialRequests: specialRequests.value,
-      totalCost: totalCost.value,
-      paymentId: paymentData.id,
-      status: 'pending',
-      createdAt: new Date().toISOString()
+    // Update booking with payment confirmation
+    const updatedBooking = {
+      bookingId: bookingId.value,
+      paymentRef: response.tx_ref,
+      paymentStatus: 'completed',
+      status: 'confirmed',
+      updatedAt: new Date().toISOString()
     }
     
-    console.log('Booking created:', booking)
+    console.log('Booking confirmed:', updatedBooking)
     bookingConfirmed.value = true
     showPayment.value = false
     
   } catch (err: any) {
-    error.value = err.message || 'Failed to create booking'
+    error.value = err.message || 'Failed to confirm booking'
   }
 }
 
-const handlePaymentError = (errorMessage: string) => {
-  error.value = errorMessage
+const handlePaymentClosed = () => {
+  showPayment.value = false
+}
+
+const handlePaymentError = (error: Error) => {
+  error.value = error.message
   showPayment.value = false
 }
 
@@ -319,11 +342,25 @@ const bookAnother = () => {
           </div>
           
           <div class="payment-form-section">
-            <PaymentForm 
+            <FlutterwavePayment
+              ref="paymentRef"
               :amount="totalCost"
-              :description="`${selectedServiceDetails?.category} with ${profile?.name}`"
+              :description="`${selectedServiceDetails?.category} booking with ${profile?.name}`"
+              payment-type="booking"
+              :related-id="bookingId"
+              :metadata="{
+                bookingId: bookingId,
+                escortId: profileId,
+                escortName: profile?.name,
+                service: selectedServiceDetails?.category,
+                date: selectedDate,
+                time: selectedTime,
+                duration: duration,
+                location: location
+              }"
               @payment-success="handlePaymentSuccess"
               @payment-error="handlePaymentError"
+              @payment-closed="handlePaymentClosed"
             />
           </div>
         </div>

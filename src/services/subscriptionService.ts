@@ -1,4 +1,11 @@
-import { databases, ID, DATABASE_ID } from '../lib/appwrite'
+import { 
+  databases, 
+  ID, 
+  DATABASE_ID,
+  SUBSCRIPTIONS_COLLECTION_ID,
+  SUBSCRIPTION_USAGE_COLLECTION_ID,
+  SUBSCRIPTION_INVOICES_COLLECTION_ID
+} from '../lib/appwrite'
 import { Query } from 'appwrite'
 import { paymentService } from './paymentService'
 import { 
@@ -14,17 +21,13 @@ import {
   getSubscriptionPlan
 } from '../types/subscription'
 
-const SUBSCRIPTIONS_COLLECTION = 'subscriptions_20250114'
-const SUBSCRIPTION_USAGE_COLLECTION = 'subscription_usage_20250114'
-const SUBSCRIPTION_INVOICES_COLLECTION = 'subscription_invoices_20250114'
-
 class SubscriptionService {
   // Get user's current subscription
   async getUserSubscription(userId: string): Promise<UserSubscription | null> {
     try {
       const response = await databases.listDocuments(
         DATABASE_ID,
-        SUBSCRIPTIONS_COLLECTION,
+        SUBSCRIPTIONS_COLLECTION_ID,
         [
           Query.equal('userId', userId),
           Query.equal('status', ['active', 'trialing', 'past_due'])
@@ -32,15 +35,61 @@ class SubscriptionService {
       )
 
       if (response.documents.length === 0) {
-        return null
+        // User has no subscription, create a free tier subscription
+        const freeTierSubscription = await this.createFreeSubscription(userId)
+        return freeTierSubscription
       }
 
       const doc = response.documents[0]
       return this.mapDocumentToSubscription(doc)
     } catch (error) {
       console.error('Error fetching user subscription:', error)
-      return null
+      // If there's an error, try to create a free subscription as fallback
+      try {
+        const freeTierSubscription = await this.createFreeSubscription(userId)
+        return freeTierSubscription
+      } catch (createError) {
+        console.error('Error creating free subscription:', createError)
+        return null
+      }
     }
+  }
+
+  // Create a free tier subscription for new users
+  private async createFreeSubscription(userId: string): Promise<UserSubscription> {
+    const startDate = new Date()
+    const endDate = new Date()
+    endDate.setMonth(endDate.getMonth() + 1) // Free tier renews monthly
+
+    const documentId = ID.unique()
+    const subscriptionData = {
+      userId,
+      planId: 'free',
+      tier: 'free',
+      billingPeriod: 'monthly',
+      status: 'active',
+      currentPeriodStart: startDate.toISOString(),
+      currentPeriodEnd: endDate.toISOString(),
+      cancelAtPeriodEnd: false,
+      lastPaymentAmount: 0,
+      nextPaymentAmount: 0,
+      profilesCreatedThisMonth: 0,
+      premiumBoostsUsedThisMonth: 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+
+    const created = await databases.createDocument(
+      DATABASE_ID,
+      SUBSCRIPTIONS_COLLECTION_ID,
+      documentId,
+      subscriptionData
+    )
+
+    // Initialize usage tracking
+    await this.initializeUsageTracking(userId, documentId)
+
+    return this.mapDocumentToSubscription(created)
   }
 
   // Create a new subscription
@@ -67,8 +116,8 @@ class SubscriptionService {
 
       // For free tier, no payment needed
       if (plan.tier === 'free') {
-        const subscription: Partial<UserSubscription> = {
-          id: ID.unique(),
+        const documentId = ID.unique()
+        const subscriptionData = {
           userId,
           planId: plan.id,
           tier: plan.tier,
@@ -87,13 +136,13 @@ class SubscriptionService {
 
         const created = await databases.createDocument(
           DATABASE_ID,
-          SUBSCRIPTIONS_COLLECTION,
-          subscription.id!,
-          subscription
+          SUBSCRIPTIONS_COLLECTION_ID,
+          documentId,
+          subscriptionData
         )
 
         // Initialize usage tracking
-        await this.initializeUsageTracking(userId, subscription.id!)
+        await this.initializeUsageTracking(userId, documentId)
 
         return this.mapDocumentToSubscription(created)
       }
@@ -113,8 +162,8 @@ class SubscriptionService {
       })
 
       // Create subscription with pending status
-      const subscription: Partial<UserSubscription> = {
-        id: ID.unique(),
+      const documentId = ID.unique()
+      const subscriptionData = {
         userId,
         planId: plan.id,
         tier: plan.tier,
@@ -136,13 +185,13 @@ class SubscriptionService {
 
       const created = await databases.createDocument(
         DATABASE_ID,
-        SUBSCRIPTIONS_COLLECTION,
-        subscription.id!,
-        subscription
+        SUBSCRIPTIONS_COLLECTION_ID,
+        documentId,
+        subscriptionData
       )
 
       // Initialize usage tracking
-      await this.initializeUsageTracking(userId, subscription.id!)
+      await this.initializeUsageTracking(userId, documentId)
 
       return this.mapDocumentToSubscription(created)
     } catch (error) {
@@ -160,7 +209,7 @@ class SubscriptionService {
     try {
       const subscription = await databases.getDocument(
         DATABASE_ID,
-        SUBSCRIPTIONS_COLLECTION,
+        SUBSCRIPTIONS_COLLECTION_ID,
         subscriptionId
       )
 
@@ -203,7 +252,7 @@ class SubscriptionService {
       // Update subscription
       await databases.updateDocument(
         DATABASE_ID,
-        SUBSCRIPTIONS_COLLECTION,
+        SUBSCRIPTIONS_COLLECTION_ID,
         subscriptionId,
         {
           planId: newPlan.id,
@@ -256,7 +305,7 @@ class SubscriptionService {
 
       const updated = await databases.updateDocument(
         DATABASE_ID,
-        SUBSCRIPTIONS_COLLECTION,
+        SUBSCRIPTIONS_COLLECTION_ID,
         subscriptionId,
         updates
       )
@@ -275,7 +324,7 @@ class SubscriptionService {
       
       const response = await databases.listDocuments(
         DATABASE_ID,
-        SUBSCRIPTION_USAGE_COLLECTION,
+        SUBSCRIPTION_USAGE_COLLECTION_ID,
         [
           Query.equal('userId', userId),
           Query.equal('subscriptionId', subscriptionId),
@@ -291,7 +340,13 @@ class SubscriptionService {
       return this.mapDocumentToUsage(response.documents[0])
     } catch (error) {
       console.error('Error fetching subscription usage:', error)
-      throw error
+      // If there's an error, try to initialize usage tracking as fallback
+      try {
+        return await this.initializeUsageTracking(userId, subscriptionId)
+      } catch (initError) {
+        console.error('Error initializing usage tracking:', initError)
+        throw error
+      }
     }
   }
 
@@ -316,7 +371,7 @@ class SubscriptionService {
 
       await databases.updateDocument(
         DATABASE_ID,
-        SUBSCRIPTION_USAGE_COLLECTION,
+        SUBSCRIPTION_USAGE_COLLECTION_ID,
         usage.subscriptionId,
         {
           profilesCreated: usage.profilesCreated + 1,
@@ -328,7 +383,7 @@ class SubscriptionService {
       // Update subscription counter
       await databases.updateDocument(
         DATABASE_ID,
-        SUBSCRIPTIONS_COLLECTION,
+        SUBSCRIPTIONS_COLLECTION_ID,
         subscriptionId,
         {
           profilesCreatedThisMonth: usage.profilesCreated + 1,
@@ -373,7 +428,7 @@ class SubscriptionService {
     try {
       const response = await databases.listDocuments(
         DATABASE_ID,
-        SUBSCRIPTION_INVOICES_COLLECTION,
+        SUBSCRIPTION_INVOICES_COLLECTION_ID,
         [
           Query.equal('userId', userId),
           Query.orderDesc('createdAt')
@@ -391,7 +446,7 @@ class SubscriptionService {
   private async initializeUsageTracking(userId: string, subscriptionId: string): Promise<SubscriptionUsage> {
     const subscription = await databases.getDocument(
       DATABASE_ID,
-      SUBSCRIPTIONS_COLLECTION,
+      SUBSCRIPTIONS_COLLECTION_ID,
       subscriptionId
     )
 
@@ -422,7 +477,7 @@ class SubscriptionService {
 
     const created = await databases.createDocument(
       DATABASE_ID,
-      SUBSCRIPTION_USAGE_COLLECTION,
+      SUBSCRIPTION_USAGE_COLLECTION_ID,
       ID.unique(),
       usage
     )

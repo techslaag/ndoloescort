@@ -25,13 +25,24 @@ const bookings = ref({
   pending: []
 })
 
-const stats = computed(() => ({
-  totalProfiles: profileStore.profiles?.length || 0,
-  activeProfiles: profileStore.profiles?.filter(p => p.status === 'active').length || 0,
-  totalViews: profileStore.profiles?.reduce((total, p) => total + (p.statsViews || 0), 0) || 0,
-  totalBookings: profileStore.profiles?.reduce((total, p) => total + (p.statsBookings || 0), 0) || 0,
-  boostedProfiles: profileStore.boostedProfiles?.length || 0
-}))
+const stats = computed(() => {
+  const profiles = profileStore.profiles || []
+  return {
+    totalProfiles: profiles.length,
+    activeProfiles: profiles.filter(p => p.status === 'active').length,
+    totalViews: profiles.reduce((total, p) => {
+      // Handle different possible property names
+      const views = p.statsViews || p.stats?.views || 0
+      return total + views
+    }, 0),
+    totalBookings: profiles.reduce((total, p) => {
+      // Handle different possible property names
+      const bookings = p.statsBookings || p.stats?.bookings || 0
+      return total + bookings
+    }, 0),
+    boostedProfiles: profileStore.boostedProfiles?.length || 0
+  }
+})
 
 const profiles = computed(() => profileStore.profiles || [])
 
@@ -63,12 +74,34 @@ onMounted(async () => {
 const loadDashboardData = async () => {
   try {
     isLoading.value = true
+    authStore.clearError()
+    
+    console.log('Loading dashboard data for user:', authStore.user?.$id)
     
     // Load profiles
-    await profileStore.fetchProfiles()
+    try {
+      await profileStore.fetchProfiles()
+      console.log('Loaded profiles:', profileStore.profiles)
+      console.log('Profile count:', profileStore.profiles?.length || 0)
+      
+      // If escort has no profiles, this is expected for new users
+      if (!profileStore.profiles || profileStore.profiles.length === 0) {
+        console.log('No profiles found - new escort user')
+      }
+    } catch (profileError) {
+      console.error('Failed to load profiles:', profileError)
+      authStore.setError('Failed to load profile data. Please try refreshing the page.')
+    }
     
     // Load advertising data for profiles
-    await profileStore.refreshAdvertisingData()
+    try {
+      if (profileStore.profiles && profileStore.profiles.length > 0) {
+        await profileStore.refreshAdvertisingData()
+      }
+    } catch (adError) {
+      console.error('Failed to load advertising data:', adError)
+      // Non-critical error, continue
+    }
     
     // Load recent activity
     recentActivity.value = [
@@ -154,9 +187,10 @@ const loadDashboardData = async () => {
       ]
     }
     
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error loading dashboard data:', error)
-    authStore.setError('Failed to load dashboard data')
+    const errorMessage = error?.message || 'Failed to load dashboard data'
+    authStore.setError(`Dashboard Error: ${errorMessage}. Please refresh the page or contact support if the issue persists.`)
   } finally {
     isLoading.value = false
   }
@@ -224,6 +258,7 @@ const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') =>
       @dismiss="handleErrorClear"
     />
     
+    
     <div class="dashboard-header">
       <div class="welcome-section">
         <h1>Welcome back, {{ authStore.user?.name || 'Escort' }}!</h1>
@@ -241,6 +276,43 @@ const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') =>
     </div>
     
     <div class="dashboard-content">
+      <!-- Getting Started for New Escorts -->
+      <div v-if="stats.totalProfiles === 0" class="getting-started">
+        <div class="getting-started-header">
+          <h2>🚀 Get Started</h2>
+          <p>Create your first profile to start receiving bookings</p>
+        </div>
+        
+        <div class="getting-started-steps">
+          <div class="step">
+            <div class="step-number">1</div>
+            <div class="step-content">
+              <h4>Create Your Profile</h4>
+              <p>Add photos, description, and services</p>
+              <button @click="createNewProfile" class="btn btn-primary btn-sm">
+                Create Profile
+              </button>
+            </div>
+          </div>
+          
+          <div class="step">
+            <div class="step-number">2</div>
+            <div class="step-content">
+              <h4>Set Your Availability</h4>
+              <p>Configure your schedule and pricing</p>
+            </div>
+          </div>
+          
+          <div class="step">
+            <div class="step-number">3</div>
+            <div class="step-content">
+              <h4>Get Verified</h4>
+              <p>Complete verification to boost credibility</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      
       <!-- Stats Cards -->
       <div class="stats-grid">
         <div class="stat-card">
@@ -310,7 +382,7 @@ const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') =>
             v-for="profile in profiles.slice(0, 3)" 
             :key="profile.id || profile.$id"
             class="profile-card"
-            @click="router.push(`/escort/profiles/${profile.id || profile.$id}`)"
+            @click="router.push(`/escort/profiles/${profile.$id || profile.id}`)"
           >
             <div class="profile-header">
               <h3>{{ profile.name }}</h3>
@@ -322,11 +394,11 @@ const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') =>
             <div class="profile-stats">
               <div class="stat">
                 <span class="stat-label">Views:</span>
-                <span class="stat-value">{{ profile.statsViews || 0 }}</span>
+                <span class="stat-value">{{ profile.statsViews || profile.stats?.views || 0 }}</span>
               </div>
               <div class="stat">
                 <span class="stat-label">Rating:</span>
-                <span class="stat-value">{{ (profile.statsRating || 0).toFixed(1) }}★</span>
+                <span class="stat-value">{{ ((profile.statsRating || profile.stats?.rating || 0)).toFixed(1) }}★</span>
               </div>
             </div>
             
@@ -1295,6 +1367,91 @@ const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') =>
     .profile-card {
       flex: 0 0 280px;
       scroll-snap-align: start;
+    }
+  }
+}
+
+// Getting Started Styles
+.getting-started {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: var(--border-radius-lg);
+  padding: 2rem;
+  color: white;
+  margin-bottom: var(--spacing-xl);
+  
+  .getting-started-header {
+    text-align: center;
+    margin-bottom: 2rem;
+    
+    h2 {
+      margin: 0 0 0.5rem 0;
+      font-size: 1.75rem;
+      font-weight: 700;
+    }
+    
+    p {
+      margin: 0;
+      font-size: 1.1rem;
+      opacity: 0.9;
+    }
+  }
+  
+  .getting-started-steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    
+    .step {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: var(--border-radius);
+      padding: 1.5rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      backdrop-filter: blur(10px);
+      
+      .step-number {
+        width: 32px;
+        height: 32px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        flex-shrink: 0;
+        font-size: 0.9rem;
+      }
+      
+      .step-content {
+        flex: 1;
+        
+        h4 {
+          margin: 0 0 0.5rem 0;
+          font-size: 1.1rem;
+          font-weight: 600;
+        }
+        
+        p {
+          margin: 0 0 1rem 0;
+          opacity: 0.9;
+          font-size: 0.95rem;
+          line-height: 1.4;
+        }
+        
+        .btn {
+          background: rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.3);
+          color: white;
+          padding: 0.5rem 1rem;
+          font-size: 0.9rem;
+          
+          &:hover {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.4);
+          }
+        }
+      }
     }
   }
 }

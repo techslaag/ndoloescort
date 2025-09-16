@@ -1,11 +1,20 @@
-import { Client, Account, Databases, Storage, Locale, Functions, Query, ID } from 'appwrite'
+import { Client, Account, Databases, Storage, Locale, Functions, Query, ID, AuthenticationFactor } from 'appwrite'
 
 // Appwrite configuration
 const client = new Client()
 
+// Use environment variables for configuration
+const endpoint = import.meta.env.VITE_APPWRITE_ENDPOINT || 'https://fra.cloud.appwrite.io/v1'
+const projectId = import.meta.env.VITE_APPWRITE_PROJECT_ID || '68874aa60018d306519d'
+
 client
-  .setEndpoint('https://fra.cloud.appwrite.io/v1') // Your Appwrite Endpoint
-  .setProject('68874aa60018d306519d') // Your project ID
+  .setEndpoint(endpoint)
+  .setProject(projectId)
+
+// Security: Log configuration in development only
+if (import.meta.env.DEV) {
+  console.log('Appwrite configured:', { endpoint, projectId })
+}
 
 // Database and collection IDs - Using timestamp-based naming convention
 export const DATABASE_ID = '6890df67000788c3e8f6'
@@ -36,6 +45,11 @@ export const NOTIFICATION_PREFS_COLLECTION_ID = 'notification_preferences'
 export const PAYMENTS_COLLECTION_ID = 'payments'
 export const REVENUE_COLLECTION_ID = 'revenue'
 export const PAYOUTS_COLLECTION_ID = 'payouts'
+
+// Subscription Collections
+export const SUBSCRIPTIONS_COLLECTION_ID = 'subscriptions'
+export const SUBSCRIPTION_USAGE_COLLECTION_ID = 'subscription_usage'
+export const SUBSCRIPTION_INVOICES_COLLECTION_ID = 'subscription_invoices'
 
 // Booking Collections
 export const BOOKINGS_COLLECTION_ID = 'bookings'
@@ -73,4 +87,4 @@ export const storage = new Storage(client)
 export const locale = new Locale(client)
 export const functions = new Functions(client)
 
-export { client, Query, ID }
+export { client, Query, ID, AuthenticationFactor }

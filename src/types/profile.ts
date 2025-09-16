@@ -139,6 +139,9 @@ export interface ProfileFormData {
     state?: string
     country: string
   }
+  locationCity?: string
+  locationState?: string
+  locationCountry?: string
   description: string
   bio?: string
   services: Array<{

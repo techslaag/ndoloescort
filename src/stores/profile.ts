@@ -2,6 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { profileService } from '../services/profileService'
 import { advertisingService } from '../services/advertisingService'
+import { useAuthStore } from './auth'
+import { handleAppwriteError } from '../utils/appwriteErrors'
 import type { EscortProfile, Service, PricingOption } from '../types/profile'
 import type { AdvertisingPurchase } from '../types/advertising'
 
@@ -99,8 +101,27 @@ export const useProfileStore = defineStore('profile', () => {
       clearError()
       profiles.value = await profileService.getUserProfiles(userId)
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch profiles')
+      setError(handleAppwriteError(err, 'fetchUserProfiles'))
       throw err
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Fetch profiles for current authenticated user
+  const fetchProfiles = async () => {
+    try {
+      setLoading(true)
+      clearError()
+      // Get the current user from auth store
+      const authStore = useAuthStore()
+      if (!authStore.user) {
+        throw new Error('User not authenticated')
+      }
+      profiles.value = await profileService.getUserProfiles(authStore.user.$id)
+    } catch (err: any) {
+      setError(handleAppwriteError(err, 'fetchProfiles'))
+      console.error('Error fetching profiles:', err)
     } finally {
       setLoading(false)
     }
@@ -113,7 +134,7 @@ export const useProfileStore = defineStore('profile', () => {
       currentProfile.value = await profileService.getProfile(profileId)
       return currentProfile.value
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch profile')
+      setError(handleAppwriteError(err, 'fetchProfile'))
       throw err
     } finally {
       setLoading(false)
@@ -124,11 +145,17 @@ export const useProfileStore = defineStore('profile', () => {
     try {
       setLoading(true)
       clearError()
+      console.log('ProfileStore.createProfile - userId:', userId)
+      console.log('ProfileStore.createProfile - profileData:', profileData)
+      
       const newProfile = await profileService.createProfile(userId, profileData)
+      console.log('ProfileStore - New profile created:', newProfile)
+      console.log('ProfileStore - Profile ID:', newProfile.$id || newProfile.id)
       profiles.value.push(newProfile)
       return newProfile
     } catch (err: any) {
-      setError(err.message || 'Failed to create profile')
+      console.error('ProfileStore.createProfile - Error:', err)
+      setError(handleAppwriteError(err, 'createProfile'))
       throw err
     } finally {
       setLoading(false)
@@ -141,20 +168,24 @@ export const useProfileStore = defineStore('profile', () => {
       clearError()
       const updatedProfile = await profileService.updateProfile(profileId, updates)
       
-      // Update in profiles array
-      const index = profiles.value.findIndex(p => p.id === profileId)
+      // Update in profiles array - check both id and $id
+      const index = profiles.value.findIndex(p => {
+        const pId = (p as any).$id || (p as any).id
+        return pId === profileId
+      })
       if (index !== -1) {
         profiles.value[index] = updatedProfile
       }
       
       // Update current profile if it's the same
-      if (currentProfile.value?.id === profileId) {
+      const currentId = (currentProfile.value as any)?.$id || (currentProfile.value as any)?.id
+      if (currentId === profileId) {
         currentProfile.value = updatedProfile
       }
       
       return updatedProfile
     } catch (err: any) {
-      setError(err.message || 'Failed to update profile')
+      setError(handleAppwriteError(err, 'updateProfile'))
       throw err
     } finally {
       setLoading(false)
@@ -162,6 +193,14 @@ export const useProfileStore = defineStore('profile', () => {
   }
 
   const deleteProfile = async (profileId: string) => {
+    console.log('=== ProfileStore.deleteProfile START ===')
+    console.log('Profile ID to delete:', profileId)
+    console.log('Current profiles before deletion:', profiles.value.map(p => ({
+      id: (p as any).id,
+      $id: (p as any).$id,
+      name: p.name
+    })))
+    
     try {
       setLoading(true)
       clearError()
@@ -169,29 +208,43 @@ export const useProfileStore = defineStore('profile', () => {
       // Set a deletion progress message
       setError('Deleting profile and related data...')
       
+      console.log('Calling profileService.deleteProfile...')
       // Delete from database using profileService (handles all related documents)
-      await profileService.deleteProfile(profileId)
+      const deleteResult = await profileService.deleteProfile(profileId)
+      console.log('Delete result from service:', deleteResult)
       
       // Clear the progress message
       clearError()
       
+      console.log('Removing from local state...')
+      const beforeCount = profiles.value.length
+      
       // Remove from local state - check both id and $id
       profiles.value = profiles.value.filter(p => {
         const pId = (p as any).$id || (p as any).id
-        return pId !== profileId
+        const shouldKeep = pId !== profileId
+        console.log(`Profile ${pId} - keep: ${shouldKeep}`)
+        return shouldKeep
       })
+      
+      const afterCount = profiles.value.length
+      console.log(`Profiles count: ${beforeCount} -> ${afterCount}`)
       
       // Clear current profile if it's the one being deleted
       if (currentProfile.value) {
         const currentId = (currentProfile.value as any).$id || (currentProfile.value as any).id
         if (currentId === profileId) {
+          console.log('Clearing current profile')
           currentProfile.value = null
         }
       }
       
+      console.log('=== ProfileStore.deleteProfile SUCCESS ===')
       return { success: true, message: 'Profile and all related data deleted successfully' }
     } catch (err: any) {
-      setError(err.message || 'Failed to delete profile')
+      console.error('=== ProfileStore.deleteProfile ERROR ===')
+      console.error('Error details:', err)
+      setError(handleAppwriteError(err, 'deleteProfile'))
       throw err
     } finally {
       setLoading(false)
@@ -204,13 +257,17 @@ export const useProfileStore = defineStore('profile', () => {
       clearError()
       const newService = await profileService.addService(profileId, service)
       
-      // Update profile in state
-      const profile = profiles.value.find(p => p.id === profileId)
+      // Update profile in state - check both id and $id
+      const profile = profiles.value.find(p => {
+        const pId = (p as any).$id || (p as any).id
+        return pId === profileId
+      })
       if (profile) {
         profile.services.push(newService)
       }
       
-      if (currentProfile.value?.id === profileId) {
+      const currentId = (currentProfile.value as any)?.$id || (currentProfile.value as any)?.id
+      if (currentId === profileId) {
         currentProfile.value.services.push(newService)
       }
       
@@ -253,13 +310,17 @@ export const useProfileStore = defineStore('profile', () => {
       clearError()
       await profileService.deleteService(serviceId)
       
-      // Remove from profile in state
-      const profile = profiles.value.find(p => p.id === profileId)
+      // Remove from profile in state - check both id and $id
+      const profile = profiles.value.find(p => {
+        const pId = (p as any).$id || (p as any).id
+        return pId === profileId
+      })
       if (profile) {
         profile.services = profile.services.filter(s => s.id !== serviceId)
       }
       
-      if (currentProfile.value?.id === profileId) {
+      const currentId = (currentProfile.value as any)?.$id || (currentProfile.value as any)?.id
+      if (currentId === profileId) {
         currentProfile.value.services = currentProfile.value.services.filter(s => s.id !== serviceId)
       }
     } catch (err: any) {
@@ -274,13 +335,17 @@ export const useProfileStore = defineStore('profile', () => {
       clearError()
       const newPricing = await profileService.addPricing(profileId, pricing)
       
-      // Update profile in state
-      const profile = profiles.value.find(p => p.id === profileId)
+      // Update profile in state - check both id and $id
+      const profile = profiles.value.find(p => {
+        const pId = (p as any).$id || (p as any).id
+        return pId === profileId
+      })
       if (profile) {
         profile.pricing.push(newPricing)
       }
       
-      if (currentProfile.value?.id === profileId) {
+      const currentId = (currentProfile.value as any)?.$id || (currentProfile.value as any)?.id
+      if (currentId === profileId) {
         currentProfile.value.pricing.push(newPricing)
       }
       
@@ -507,6 +572,28 @@ export const useProfileStore = defineStore('profile', () => {
     }
   }
 
+  // Advertising methods
+  async function loadProfileAdvertising(profileId: string) {
+    try {
+      const ads = await advertisingService.getProfileAdvertising(profileId)
+      profileAdvertising.value[profileId] = ads
+    } catch (err: any) {
+      console.error('Failed to load profile advertising:', err)
+      setError(err.message || 'Failed to load advertising data')
+    }
+  }
+
+  async function refreshAdvertisingData() {
+    try {
+      for (const profile of profiles.value) {
+        const profileId = profile.$id || profile.id
+        await loadProfileAdvertising(profileId)
+      }
+    } catch (err: any) {
+      console.error('Failed to refresh advertising data:', err)
+    }
+  }
+
   // Reset store
   const reset = () => {
     profiles.value = []
@@ -523,6 +610,7 @@ export const useProfileStore = defineStore('profile', () => {
     isLoading,
     error,
     uploadProgress,
+    profileAdvertising,
     
     // Computed
     activeProfiles,
@@ -534,6 +622,7 @@ export const useProfileStore = defineStore('profile', () => {
     clearError,
     setLoading,
     fetchUserProfiles,
+    fetchProfiles,
     fetchProfile,
     createProfile,
     updateProfile,
@@ -558,74 +647,6 @@ export const useProfileStore = defineStore('profile', () => {
     refreshAdvertisingData,
     // Computed getters
     boostedProfiles,
-    getProfileAdvertising,
-    getActiveAdvertising,
-    isProfileBoosted,
-    getProfileBoostType
-  }
-
-  // Advertising methods
-  async function loadProfileAdvertising(profileId: string) {
-    try {
-      const ads = await advertisingService.getProfileAdvertising(profileId)
-      profileAdvertising.value[profileId] = ads
-    } catch (err: any) {
-      console.error('Failed to load profile advertising:', err)
-      setError(err.message || 'Failed to load advertising data')
-    }
-  }
-
-  async function refreshAdvertisingData() {
-    try {
-      for (const profile of profiles.value) {
-        const profileId = profile.$id || profile.id
-        await loadProfileAdvertising(profileId)
-      }
-    } catch (err: any) {
-      console.error('Failed to refresh advertising data:', err)
-    }
-  }
-
-  return {
-    // State
-    profiles,
-    currentProfile,
-    isLoading,
-    error,
-    uploadProgress,
-    profileAdvertising,
-    // Computed
-    activeProfiles,
-    draftProfiles,
-    profileStats,
-    boostedProfiles,
-    // Methods
-    setError,
-    clearError,
-    setLoading,
-    fetchUserProfiles,
-    fetchProfile,
-    createProfile,
-    updateProfile,
-    deleteProfile,
-    createService,
-    createPricing,
-    addService,
-    updateService,
-    removeService,
-    addPricing,
-    updatePricing,
-    uploadMedia,
-    removeMedia,
-    updateAvailability,
-    getAvailability,
-    syncBookingWithCalendar,
-    incrementProfileView,
-    submitVerification,
-    reset,
-    // Advertising methods
-    loadProfileAdvertising,
-    refreshAdvertisingData,
     getProfileAdvertising,
     getActiveAdvertising,
     isProfileBoosted,

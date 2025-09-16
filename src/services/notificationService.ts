@@ -539,19 +539,17 @@ export class NotificationService {
   subscribeToNotifications(userId: string, callback: (notification: Notification) => void): () => void {
     this.subscribers.set(userId, callback)
 
-    // Subscribe to Appwrite real-time
-    const unsubscribe = realtimeService.subscribe(
-      `databases.${DATABASE_ID}.collections.${NOTIFICATIONS_COLLECTION_ID}.documents`,
-      (response: RealtimeResponseEvent<any>) => {
-        if (response.payload.userId === userId) {
-          const notification = {
-            ...response.payload,
-            data: response.payload.data ? JSON.parse(response.payload.data) : undefined
-          } as Notification
-          callback(notification)
-        }
+    // Subscribe to Appwrite real-time notifications
+    const channel = `databases.${DATABASE_ID}.collections.${NOTIFICATIONS_COLLECTION_ID}.documents`
+    const unsubscribe = realtimeService.subscribe(channel, (response: RealtimeResponseEvent<any>) => {
+      if (response.payload && response.payload.userId === userId) {
+        const notification = {
+          ...response.payload,
+          data: response.payload.data ? JSON.parse(response.payload.data) : undefined
+        } as Notification
+        callback(notification)
       }
-    )
+    })
 
     return () => {
       this.subscribers.delete(userId)
@@ -655,6 +653,88 @@ export class NotificationService {
       { badgeId },
       'low'
     )
+  }
+
+  // Security Notifications
+  async notifyLoginAlert(
+    userId: string,
+    ipAddress: string,
+    userAgent: string,
+    location?: string,
+    isNewDevice?: boolean
+  ): Promise<void> {
+    // Parse device info from user agent
+    const deviceInfo = this.parseUserAgent(userAgent)
+    const locationText = location || 'Unknown location'
+    const deviceText = `${deviceInfo.browser} on ${deviceInfo.os}`
+    
+    let title = 'New Login to Your Account'
+    let message = `Someone logged into your account from ${deviceText} at ${locationText}`
+    
+    if (isNewDevice) {
+      title = 'Login from New Device'
+      message = `Your account was accessed from a new device: ${deviceText} at ${locationText}`
+    }
+    
+    await this.createNotification(
+      userId,
+      'security_alert',
+      title,
+      message,
+      { 
+        ipAddress, 
+        userAgent,
+        location,
+        deviceInfo,
+        timestamp: new Date().toISOString()
+      },
+      'high'
+    )
+  }
+  
+  async notifySecurityEvent(
+    userId: string,
+    eventType: 'password_changed' | 'email_changed' | '2fa_enabled' | '2fa_disabled' | 'suspicious_activity',
+    details: string
+  ): Promise<void> {
+    const titles: Record<string, string> = {
+      'password_changed': 'Password Changed',
+      'email_changed': 'Email Address Changed',
+      '2fa_enabled': 'Two-Factor Authentication Enabled',
+      '2fa_disabled': 'Two-Factor Authentication Disabled',
+      'suspicious_activity': 'Suspicious Activity Detected'
+    }
+    
+    await this.createNotification(
+      userId,
+      'security_alert',
+      titles[eventType] || 'Security Alert',
+      details,
+      { eventType },
+      'high'
+    )
+  }
+  
+  // Helper to parse user agent
+  private parseUserAgent(userAgent: string): { browser: string; os: string } {
+    let browser = 'Unknown Browser'
+    let os = 'Unknown OS'
+    
+    // Detect browser
+    if (/Chrome/.test(userAgent) && !/Chromium|Edg/.test(userAgent)) browser = 'Chrome'
+    else if (/Firefox/.test(userAgent)) browser = 'Firefox'
+    else if (/Safari/.test(userAgent) && !/Chrome/.test(userAgent)) browser = 'Safari'
+    else if (/Edg/.test(userAgent)) browser = 'Edge'
+    else if (/Opera|OPR/.test(userAgent)) browser = 'Opera'
+    
+    // Detect OS
+    if (/Windows/.test(userAgent)) os = 'Windows'
+    else if (/Mac OS|Macintosh/.test(userAgent)) os = 'macOS'
+    else if (/Linux/.test(userAgent)) os = 'Linux'
+    else if (/Android/.test(userAgent)) os = 'Android'
+    else if (/iOS|iPhone|iPad/.test(userAgent)) os = 'iOS'
+    
+    return { browser, os }
   }
 }
 

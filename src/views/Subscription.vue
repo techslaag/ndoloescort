@@ -4,8 +4,9 @@ import { useRouter } from 'vue-router'
 import { useSubscriptionStore } from '../stores/subscription'
 import { useAuthStore } from '../stores/auth'
 import { SUBSCRIPTION_PLANS, type SubscriptionPlan, type BillingPeriod } from '../types/subscription'
-import PaymentForm from '../components/payment/PaymentForm.vue'
+import FlutterwavePayment from '../components/payment/FlutterwavePayment.vue'
 import ErrorAlert from '../components/ErrorAlert.vue'
+import { flutterwaveService } from '../services/flutterwaveService'
 
 const router = useRouter()
 const subscriptionStore = useSubscriptionStore()
@@ -19,6 +20,7 @@ const showCancelModal = ref(false)
 const cancellationReason = ref('')
 const showUpgradeModal = ref(false)
 const upgradePlan = ref<SubscriptionPlan | null>(null)
+const paymentRef = ref<InstanceType<typeof FlutterwavePayment>>()
 
 const plans = computed(() => SUBSCRIPTION_PLANS)
 const currentSubscription = computed(() => subscriptionStore.currentSubscription)
@@ -74,10 +76,11 @@ const proceedWithUpgrade = () => {
   showPayment.value = true
 }
 
-const handlePaymentSuccess = async (paymentData: any) => {
+const handlePaymentSuccess = async (response: any) => {
   try {
     if (!selectedPlan.value) return
 
+    // Payment successful, create or update subscription
     if (currentSubscription.value && currentSubscription.value.tier !== 'free') {
       // Upgrade existing subscription
       await subscriptionStore.updateSubscription(
@@ -85,11 +88,11 @@ const handlePaymentSuccess = async (paymentData: any) => {
         selectedBillingPeriod.value
       )
     } else {
-      // Create new subscription
+      // Create new subscription with Flutterwave payment reference
       await subscriptionStore.createSubscription(
         selectedPlan.value.id,
         selectedBillingPeriod.value,
-        paymentData.paymentMethodId
+        response.tx_ref // Flutterwave transaction reference
       )
     }
 
@@ -103,9 +106,15 @@ const handlePaymentSuccess = async (paymentData: any) => {
   }
 }
 
-const handlePaymentError = (error: string) => {
+const handlePaymentClosed = () => {
+  showPayment.value = false
+}
+
+const handlePaymentError = (error: Error) => {
   console.error('Payment error:', error)
   showPayment.value = false
+  // Show error to user
+  subscriptionStore.error = error.message
 }
 
 const cancelSubscription = async () => {
@@ -314,11 +323,21 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
           </div>
           
           <div class="payment-form-section">
-            <PaymentForm 
+            <FlutterwavePayment
+              ref="paymentRef"
               :amount="getPrice(selectedPlan)"
               :description="`${selectedPlan.name} subscription - ${selectedBillingPeriod}`"
+              payment-type="subscription"
+              :related-id="selectedPlan.id"
+              :metadata="{
+                planId: selectedPlan.id,
+                planName: selectedPlan.name,
+                billingPeriod: selectedBillingPeriod,
+                tier: selectedPlan.tier
+              }"
               @payment-success="handlePaymentSuccess"
               @payment-error="handlePaymentError"
+              @payment-closed="handlePaymentClosed"
             />
           </div>
         </div>

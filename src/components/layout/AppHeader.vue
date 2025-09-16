@@ -6,13 +6,16 @@ import { useLocationStore } from '../../stores/location'
 import { useLogout } from '../../composables/useLogout'
 import LocationModal from '../LocationModal.vue'
 import NotificationBell from '../notifications/NotificationBell.vue'
+import AnonymousLogoutModal from '../auth/AnonymousLogoutModal.vue'
 import { useNotificationStore } from '../../stores/notification'
+import { useToast } from '../../composables/useToast'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const locationStore = useLocationStore()
 const notificationStore = useNotificationStore()
 const { performLogout } = useLogout()
+const { success, error: showError } = useToast()
 
 const isMenuOpen = ref(false)
 const isScrolled = ref(false)
@@ -20,6 +23,8 @@ const isLoggingOut = ref(false)
 const isUserDropdownOpen = ref(false)
 const isLocationModalOpen = ref(false)
 const locationModalRef = ref()
+const anonymousLogoutModalRef = ref()
+const isSendingVerification = ref(false)
 
 const toggleMenu = () => {
   isMenuOpen.value = !isMenuOpen.value
@@ -64,14 +69,44 @@ const closeLocationModal = () => {
 const handleLogout = async () => {
   if (isLoggingOut.value) return
   
+  // Check if user is anonymous
+  const isAnonymous = authStore.user?.prefs && (authStore.user.prefs as any).isAnonymous === true
+  
+  if (isAnonymous) {
+    // Show warning modal for anonymous users
+    closeMenu()
+    closeUserDropdown()
+    if (anonymousLogoutModalRef.value) {
+      anonymousLogoutModalRef.value.open()
+    }
+  } else {
+    // Regular logout for authenticated users
+    isLoggingOut.value = true
+    closeMenu()
+    
+    try {
+      await performLogout({
+        redirectTo: '/',
+        showMessage: true,
+        reason: 'user_action'
+      })
+    } catch (error) {
+      console.error('Logout error:', error)
+    } finally {
+      isLoggingOut.value = false
+    }
+  }
+}
+
+const confirmAnonymousLogout = async () => {
   isLoggingOut.value = true
-  closeMenu()
   
   try {
     await performLogout({
       redirectTo: '/',
       showMessage: true,
-      reason: 'user_action'
+      reason: 'anonymous_logout',
+      customMessage: 'Anonymous session ended. All data has been permanently deleted.'
     })
   } catch (error) {
     console.error('Logout error:', error)
@@ -98,6 +133,34 @@ const userRole = computed(() => {
 
 const isEscort = computed(() => userRole.value === 'escort')
 const isClient = computed(() => userRole.value === 'client')
+const isAnonymous = computed(() => {
+  const result = authStore.user?.prefs && (authStore.user.prefs as any).isAnonymous === true
+  console.log('isAnonymous computed:', { 
+    user: authStore.user, 
+    prefs: authStore.user?.prefs, 
+    isAnonymous: result 
+  })
+  return result
+})
+
+// Send verification email
+const sendVerificationEmail = async () => {
+  try {
+    isSendingVerification.value = true
+    const result = await authStore.sendEmailVerification()
+    
+    if (result.success) {
+      success('Verification email sent! Please check your inbox.')
+    } else {
+      showError(result.error || 'Failed to send verification email')
+    }
+  } catch (error) {
+    console.error('Error sending verification email:', error)
+    showError('Failed to send verification email')
+  } finally {
+    isSendingVerification.value = false
+  }
+}
 
 // Handle touch events for better mobile experience
 const handleTouchStart = (event: TouchEvent) => {
@@ -139,6 +202,11 @@ onMounted(async () => {
   document.addEventListener('touchstart', handleTouchStart)
   document.addEventListener('click', handleClickOutside)
   
+  // Refresh user data to ensure we have latest prefs
+  if (authStore.isAuthenticated && authStore.refreshUser) {
+    await authStore.refreshUser()
+  }
+  
   // Initialize notifications if authenticated
   if (authStore.isAuthenticated) {
     await notificationStore.initialize()
@@ -157,7 +225,21 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <header :class="['site-header', { 'scrolled': isScrolled }]">
+  <div>
+    <!-- Email Verification Banner -->
+    <div v-if="authStore.isAuthenticated && !authStore.isEmailVerified && !isAnonymous" class="verification-banner">
+      <div class="container">
+        <div class="banner-content">
+          <span class="banner-icon">⚠️</span>
+          <span class="banner-text">Please verify your email address to access all features.</span>
+          <button @click="sendVerificationEmail" :disabled="isSendingVerification" class="btn-verify">
+            {{ isSendingVerification ? 'Sending...' : 'Verify Email' }}
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <header :class="['site-header', { 'scrolled': isScrolled, 'with-banner': authStore.isAuthenticated && !authStore.isEmailVerified && !isAnonymous }]">
     <div class="container header-container">
       <div class="logo-container" @click="navigateTo('/')">
         <h1 class="logo">
@@ -230,7 +312,7 @@ onUnmounted(() => {
                   <div class="user-info">
                     <span class="user-name-full">{{ authStore.user?.name || 'User' }}</span>
                     <span class="user-email">{{ authStore.user?.email || '' }}</span>
-                    <span class="user-role">{{ isEscort ? 'Escort' : 'Client' }}</span>
+                    <span class="user-role">{{ isEscort ? 'Escort' : isAnonymous ? 'Anonymous' : 'Client' }}</span>
                   </div>
                 </div>
                 
@@ -243,25 +325,50 @@ onUnmounted(() => {
                   Dashboard
                 </a>
                 
-                <a @click="navigateTo(isEscort ? '/escort/profiles' : '/profile')" class="dropdown-item">
+                <a v-if="!isAnonymous" @click="navigateTo(isEscort ? '/escort/profiles' : '/profile')" class="dropdown-item">
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M8 8a3 3 0 100-6 3 3 0 000 6zm2-3a2 2 0 11-4 0 2 2 0 014 0zm4 8c0 1-1 1-1 1H3s-1 0-1-1 1-4 6-4 6 3 6 4zm-1-.004c-.001-.246-.154-.986-.832-1.664C11.516 10.68 10.289 10 8 10c-2.29 0-3.516.68-4.168 1.332-.678.678-.83 1.418-.832 1.664h10z"/>
                   </svg>
                   {{ isEscort ? 'My Profiles' : 'Profile' }}
                 </a>
                 
-                <a @click="navigateTo('/settings')" class="dropdown-item">
+                <!-- Anonymous profile info -->
+                <div v-if="isAnonymous" class="dropdown-item anonymous-feature">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                    <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
+                  </svg>
+                  <div class="feature-text">
+                    <span>Profile</span>
+                    <small>Create an account to manage your profile</small>
+                  </div>
+                </div>
+                
+                <a v-if="!isAnonymous" @click="navigateTo('/settings')" class="dropdown-item">
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M7.068.727c.243-.97 1.62-.97 1.864 0l.071.286a.96.96 0 001.622.434l.205-.211c.695-.719 1.888-.03 1.613.931l-.08.284a.96.96 0 001.187 1.187l.283-.081c.96-.275 1.65.918.931 1.613l-.211.205a.96.96 0 00.434 1.622l.286.071c.97.243.97 1.62 0 1.864l-.286.071a.96.96 0 00-.434 1.622l.211.205c.719.695.03 1.888-.931 1.613l-.284-.08a.96.96 0 00-1.187 1.187l.081.283c.275.96-.918 1.65-1.613.931l-.205-.211a.96.96 0 00-1.622.434l-.071.286c-.243.97-1.62.97-1.864 0l-.071-.286a.96.96 0 00-1.622-.434l-.205.211c-.695.719-1.888.03-1.613-.931l.08-.284a.96.96 0 00-1.186-1.187l-.284.081c-.96.275-1.65-.918-.931-1.613l.211-.205a.96.96 0 00-.434-1.622l-.286-.071c-.97-.243-.97-1.62 0-1.864l.286-.071a.96.96 0 00.434-1.622l-.211-.205c-.719-.695-.03-1.888.931-1.613l.284.08a.96.96 0 001.187-1.187l-.081-.283c-.275-.96.918-1.65 1.613-.931l.205.211a.96.96 0 001.622-.434l.071-.286zM8 11a3 3 0 110-6 3 3 0 010 6z"/>
                   </svg>
                   Settings
                 </a>
                 
+                <!-- Anonymous settings info -->
+                <div v-if="isAnonymous" class="dropdown-item anonymous-feature">
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/>
+                    <path d="m8.93 6.588-2.29.287-.082.38.45.083c.294.07.352.176.288.469l-.738 3.468c-.194.897.105 1.319.808 1.319.545 0 1.178-.252 1.465-.598l.088-.416c-.2.176-.492.246-.686.246-.275 0-.375-.193-.304-.533L8.93 6.588zM9 4.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0z"/>
+                  </svg>
+                  <div class="feature-text">
+                    <span>Settings</span>
+                    <small>Create an account to access settings</small>
+                  </div>
+                </div>
+                
                 <a @click="navigateTo('/messages')" class="dropdown-item">
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
                     <path d="M2.678 11.894a1 1 0 01.287.801 10.97 10.97 0 01-.398 2c1.395-.323 2.247-.697 2.634-.893a1 1 0 01.71-.074A8.06 8.06 0 008 14c3.996 0 7-2.807 7-6 0-3.192-3.004-6-7-6S1 4.808 1 8c0 1.468.617 2.83 1.678 3.894zm-.493 3.905a21.682 21.682 0 01-.713.129c-.2.032-.352-.176-.273-.362a9.68 9.68 0 00.244-.637l.003-.01c.248-.72.45-1.548.524-2.319C.743 11.37 0 9.76 0 8c0-3.866 3.582-7 8-7s8 3.134 8 7-3.582 7-8 7a9.06 9.06 0 01-2.347-.306c-.52.263-1.639.742-3.468 1.105z"/>
                   </svg>
                   Messages
+                  <span v-if="isAnonymous" class="anonymous-badge">Anonymous</span>
                 </a>
                 
                 <div class="dropdown-divider"></div>
@@ -294,11 +401,76 @@ onUnmounted(() => {
       
       <!-- LocationModal component -->
       <LocationModal ref="locationModalRef" />
+      
+      <!-- Anonymous Logout Modal -->
+      <AnonymousLogoutModal 
+        ref="anonymousLogoutModalRef"
+        @confirm="confirmAnonymousLogout"
+        @cancel="() => {}"
+      />
     </div>
   </header>
+  </div>
 </template>
 
 <style scoped lang="scss">
+/* Email Verification Banner */
+.verification-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #fbbf24;
+  z-index: 101;
+  padding: 0.75rem 0;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  
+  .banner-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    
+    @media (max-width: 768px) {
+      font-size: 0.9rem;
+      text-align: center;
+    }
+  }
+  
+  .banner-icon {
+    font-size: 1.2rem;
+    flex-shrink: 0;
+  }
+  
+  .banner-text {
+    color: #78350f;
+    font-weight: 500;
+  }
+  
+  .btn-verify {
+    background: #92400e;
+    color: white;
+    border: none;
+    padding: 0.4rem 1rem;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+    
+    &:hover:not(:disabled) {
+      background: #78350f;
+    }
+    
+    &:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+  }
+}
+
 .site-header {
   position: fixed;
   top: 0;
@@ -315,6 +487,10 @@ onUnmounted(() => {
     background-color: var(--color-background-dark);
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
     padding: 0.75rem 0;
+  }
+  
+  &.with-banner {
+    top: 52px; /* Height of verification banner */
   }
 }
 
@@ -643,6 +819,38 @@ onUnmounted(() => {
       }
     }
     
+    &.anonymous-feature {
+      background: #f8f9fa;
+      cursor: default;
+      opacity: 0.7;
+      
+      &:hover {
+        background: #f8f9fa;
+      }
+      
+      .feature-text {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        
+        span {
+          color: #6c757d;
+          font-size: 0.9rem;
+          font-weight: 500;
+        }
+        
+        small {
+          color: #adb5bd;
+          font-size: 0.8rem;
+        }
+      }
+      
+      svg {
+        color: #6c757d;
+        flex-shrink: 0;
+      }
+    }
+    
     &.disabled {
       opacity: 0.6;
       cursor: not-allowed;
@@ -657,6 +865,17 @@ onUnmounted(() => {
       height: 18px;
       color: var(--color-text-light);
       transition: color 0.2s ease;
+    }
+    
+    .anonymous-badge {
+      margin-left: auto;
+      font-size: 0.7rem;
+      background: #fbbf24;
+      color: #92400e;
+      padding: 0.125rem 0.375rem;
+      border-radius: 4px;
+      font-weight: 600;
+      text-transform: uppercase;
     }
   }
 }
@@ -885,8 +1104,37 @@ onUnmounted(() => {
           }
         }
         
+        &.anonymous-feature {
+          background: rgba(255, 255, 255, 0.05);
+          cursor: default;
+          opacity: 0.7;
+          
+          &:hover {
+            background: rgba(255, 255, 255, 0.05);
+          }
+          
+          .feature-text {
+            span {
+              color: rgba(255, 255, 255, 0.8);
+            }
+            
+            small {
+              color: rgba(255, 255, 255, 0.6);
+            }
+          }
+          
+          svg {
+            color: rgba(255, 255, 255, 0.7);
+          }
+        }
+        
         svg {
           color: rgba(255, 255, 255, 0.8);
+        }
+        
+        .anonymous-badge {
+          background: rgba(251, 191, 36, 0.9);
+          color: #92400e;
         }
       }
     }

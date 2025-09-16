@@ -9,6 +9,7 @@ import { ID } from 'appwrite'
 import MessageBubble from './MessageBubble.vue'
 import MessageInput from './MessageInput.vue'
 import CallManager from './CallManager.vue'
+import GiftModal from '../gifts/GiftModal.vue'
 
 interface Props {
   conversationId: string
@@ -38,7 +39,7 @@ const messageText = ref('')
 const isTyping = ref(false)
 const isRecording = ref(false)
 const recordingTime = ref(0)
-const recordingTimer = ref<NodeJS.Timer | null>(null)
+const recordingTimer = ref<number | null>(null)
 const mediaRecorder = ref<MediaRecorder | null>(null)
 const audioChunks = ref<Blob[]>([])
 const showEmojiPicker = ref(false)
@@ -55,6 +56,8 @@ const reactionPickerState = ref({
   position: { x: 0, y: 0 },
   messageId: ''
 })
+const showGiftModal = ref(false)
+const callManagerRef = ref<InstanceType<typeof CallManager>>()
 
 // Quick reaction emojis (Telegram style)
 const quickEmojis = ['👍', '👎', '❤️', '😂', '😍', '😢', '😡', '🔥', '👏', '🎉', '💯', '🤔']
@@ -78,7 +81,7 @@ function throttle(func: Function, limit: number) {
     if (!inThrottle) {
       func.apply(this, args)
       inThrottle = true
-      setTimeout(() => inThrottle = false, limit)
+      window.setTimeout(() => inThrottle = false, limit)
     }
   }
 }
@@ -165,7 +168,7 @@ const startRecording = async () => {
     recordingTime.value = 0
     
     // Start timer
-    recordingTimer.value = setInterval(() => {
+    recordingTimer.value = window.setInterval(() => {
       recordingTime.value++
       // Auto-stop at 5 minutes (300 seconds)
       if (recordingTime.value >= 300) {
@@ -184,7 +187,7 @@ const stopRecording = () => {
     isRecording.value = false
     
     if (recordingTimer.value) {
-      clearInterval(recordingTimer.value)
+      window.clearInterval(recordingTimer.value)
       recordingTimer.value = null
     }
   }
@@ -197,7 +200,7 @@ const cancelRecording = () => {
     audioChunks.value = []
     
     if (recordingTimer.value) {
-      clearInterval(recordingTimer.value)
+      window.clearInterval(recordingTimer.value)
       recordingTimer.value = null
     }
     
@@ -229,7 +232,7 @@ const sendVoiceMessage = async (audioBlob: Blob) => {
     
     // Get file URL
     const fileUrl = storage.getFileView(MEDIA_BUCKET_ID, uploadedFile.$id)
-    const fileUrlString = fileUrl.href || fileUrl.toString()
+    const fileUrlString = (fileUrl as any).href || fileUrl.toString()
     
     console.log('Voice file URL:', {
       url: fileUrlString,
@@ -287,7 +290,7 @@ const handleFileSelect = async (event: Event) => {
       
       // Get file URL
       const fileUrl = storage.getFileView(MEDIA_BUCKET_ID, uploadedFile.$id)
-      const fileUrlString = fileUrl.href || fileUrl.toString()
+      const fileUrlString = (fileUrl as any).href || fileUrl.toString()
       console.log('File uploaded, URL:', fileUrlString)
       console.log('File details:', {
         id: uploadedFile.$id,
@@ -341,7 +344,7 @@ const handleEmojiSelect = (emoji: string) => {
 // Simulate typing indicator (in real app, this would come from realtime service)
 const simulateTyping = () => {
   isTyping.value = true
-  setTimeout(() => {
+  window.setTimeout(() => {
     isTyping.value = false
   }, 3000)
 }
@@ -606,7 +609,7 @@ onMounted(async () => {
     }, { passive: true })
     
     messagesContainer.value.addEventListener('touchend', () => {
-      setTimeout(() => {
+      window.setTimeout(() => {
         isScrolling = false
       }, 100)
     }, { passive: true })
@@ -651,6 +654,21 @@ onUnmounted(() => {
   document.removeEventListener('keydown', handleContextMenuKeyDown)
 })
 
+// Handle gift sent
+const handleGiftSent = async (gift: any) => {
+  // Send a system message about the gift
+  const giftMessage = `Sent a ${gift.name} ${gift.icon} gift`
+  await handleSendMessage(giftMessage, 'system')
+  
+  // Show a success notification
+  console.log('Gift sent:', gift)
+}
+
+// Handle call start - not needed anymore as CallManager handles it
+const startCall = (type: 'audio' | 'video') => {
+  console.log('Starting', type, 'call - handled by CallManager')
+}
+
 onUnmounted(() => {
   // Mark messages as read when leaving
   messages.value.forEach(message => {
@@ -690,15 +708,16 @@ onUnmounted(() => {
       </div>
       
       <div class="header-actions">
-        <button class="action-btn" @click="startCall('voice')" title="Voice call">
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" fill="currentColor"/>
-          </svg>
-        </button>
+        <!-- Call Manager with call buttons -->
+        <CallManager
+          ref="callManagerRef"
+          :receiver-id="receiverId"
+          :receiver-name="receiverName"
+        />
         
-        <button class="action-btn" @click="startCall('video')" title="Video call">
+        <button class="action-btn gift-btn" @click="showGiftModal = true" title="Send a gift">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z" fill="currentColor"/>
+            <path d="M20 12v10H4V12M2 7h20l-2 5H4l-2-5zm10-5a1 1 0 100 2 1 1 0 000-2zm0 0V2m0 0L7 7m5-5l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
         </button>
         
@@ -992,6 +1011,16 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+    
+    <!-- Gift Modal -->
+    <GiftModal
+      v-if="showGiftModal"
+      :recipient-id="receiverId"
+      :recipient-name="receiverName"
+      context="chat"
+      @gift-sent="handleGiftSent"
+      @close="showGiftModal = false"
+    />
   </div>
 </template>
 
@@ -1164,6 +1193,15 @@ onUnmounted(() => {
   background: none;
   border: none;
   color: #b5bac1;
+  
+  &.gift-btn {
+    color: #faa81a;
+    
+    &:hover {
+      color: #ffb829;
+      background: rgba(250, 168, 26, 0.15);
+    }
+  }
   cursor: pointer;
   padding: 8px;
   border-radius: 50%;

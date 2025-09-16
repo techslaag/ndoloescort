@@ -14,8 +14,21 @@ export function useSessionMonitor() {
   
   // Configuration
   const SESSION_CHECK_INTERVAL = 60000 // Check every minute
-  const INACTIVITY_TIMEOUT = 30 * 60 * 1000 // 30 minutes
   const WARNING_BEFORE_TIMEOUT = 5 * 60 * 1000 // Warn 5 minutes before timeout
+  
+  // Get session timeout from user preferences
+  const getInactivityTimeout = () => {
+    const prefs = authStore.user?.prefs as any
+    const timeoutMinutes = prefs?.security?.sessionTimeout || '30' // Default 30 minutes
+    
+    // Handle 'Never' option
+    if (timeoutMinutes === '0' || timeoutMinutes === 'Never') {
+      return Infinity // Never timeout
+    }
+    
+    // Convert minutes to milliseconds
+    return parseInt(timeoutMinutes) * 60 * 1000
+  }
   
   // Update last activity timestamp
   const updateActivity = () => {
@@ -43,20 +56,30 @@ export function useSessionMonitor() {
   const checkInactivity = () => {
     if (!authStore.isAuthenticated) return
     
+    const inactivityTimeout = getInactivityTimeout()
+    
+    // Skip check if timeout is disabled
+    if (inactivityTimeout === Infinity) return
+    
     const now = Date.now()
     const timeSinceLastActivity = now - lastActivity.value
     
-    if (timeSinceLastActivity >= INACTIVITY_TIMEOUT) {
+    if (timeSinceLastActivity >= inactivityTimeout) {
       // Auto logout due to inactivity
       performLogout({
         reason: 'session_expired',
         showMessage: true,
         redirectTo: '/login'
       })
-    } else if (timeSinceLastActivity >= INACTIVITY_TIMEOUT - WARNING_BEFORE_TIMEOUT) {
+    } else if (timeSinceLastActivity >= inactivityTimeout - WARNING_BEFORE_TIMEOUT) {
       // Show warning (you can emit an event or show a modal here)
-      const remainingMinutes = Math.ceil((INACTIVITY_TIMEOUT - timeSinceLastActivity) / 60000)
+      const remainingMinutes = Math.ceil((inactivityTimeout - timeSinceLastActivity) / 60000)
       console.warn(`Session will expire in ${remainingMinutes} minutes due to inactivity`)
+      
+      // Emit warning event for UI to handle
+      window.dispatchEvent(new CustomEvent('session-warning', {
+        detail: { remainingMinutes }
+      }))
     }
   }
   

@@ -19,10 +19,21 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<Emits>()
 
 const confirmationText = ref('')
-const requiredText = computed(() => `DELETE ${props.profileName}`)
+const requiredText = computed(() => {
+  const name = props.profileName || 'UNNAMED PROFILE'
+  return `DELETE ${name}`
+})
 
 const canConfirm = computed(() => {
-  return confirmationText.value === requiredText.value
+  const isMatch = confirmationText.value === requiredText.value
+  console.log('Confirmation check:', {
+    typed: confirmationText.value,
+    required: requiredText.value,
+    isMatch,
+    typedLength: confirmationText.value.length,
+    requiredLength: requiredText.value.length
+  })
+  return isMatch
 })
 
 // Reset confirmation text when modal opens/closes
@@ -33,8 +44,18 @@ watch(() => props.isOpen, (newValue) => {
 })
 
 const handleConfirm = () => {
+  console.log('handleConfirm called', {
+    canConfirm: canConfirm.value,
+    confirmationText: confirmationText.value,
+    requiredText: requiredText.value
+  })
+  
   if (canConfirm.value) {
+    console.log('Emitting confirm event')
     emit('confirm')
+  } else {
+    console.log('Cannot confirm - text does not match')
+    alert(`Please type exactly: ${requiredText.value}`)
   }
 }
 
@@ -76,7 +97,7 @@ const handleBackdropClick = (event: MouseEvent) => {
           <div class="warning-icon">🚨</div>
           <div class="warning-content">
             <h3>This action cannot be undone</h3>
-            <p>Deleting "<strong>{{ profileName }}</strong>" will permanently remove:</p>
+            <p>Deleting "<strong>{{ profileName || 'Unnamed Profile' }}</strong>" will permanently remove:</p>
           </div>
         </div>
         
@@ -93,6 +114,14 @@ const handleBackdropClick = (event: MouseEvent) => {
         <div class="confirmation-section">
           <label for="confirmation-input" class="confirmation-label">
             To confirm deletion, type: <code>{{ requiredText }}</code>
+            <button 
+              type="button"
+              @click="confirmationText = requiredText"
+              style="margin-left: 8px; padding: 2px 8px; font-size: 12px; background: #e9ecef; border: 1px solid #ced4da; border-radius: 4px; cursor: pointer;"
+              title="Click to auto-fill"
+            >
+              📋 Copy
+            </button>
           </label>
           <input
             id="confirmation-input"
@@ -100,9 +129,16 @@ const handleBackdropClick = (event: MouseEvent) => {
             type="text"
             class="confirmation-input"
             :class="{ 'valid': canConfirm }"
-            placeholder="Type the confirmation text..."
+            :placeholder="`Type: ${requiredText}`"
             :disabled="isDeleting"
+            @input="console.log('Input changed:', confirmationText)"
           />
+          <div v-if="confirmationText && !canConfirm" class="confirmation-hint">
+            <small style="color: #dc3545;">
+              Text doesn't match. You typed: "{{ confirmationText }}" ({{ confirmationText.length }} chars)<br>
+              Required: "{{ requiredText }}" ({{ requiredText.length }} chars)
+            </small>
+          </div>
         </div>
       </div>
       

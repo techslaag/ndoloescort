@@ -94,6 +94,16 @@ const routes: Array<RouteRecordRaw> = [
     component: () => import('../views/auth/ResetPassword.vue')
   },
   {
+    path: '/verify-email',
+    name: 'VerifyEmail',
+    component: () => import('../views/VerifyEmail.vue')
+  },
+  {
+    path: '/verification-code',
+    name: 'VerificationCode',
+    component: () => import('../views/auth/VerificationCode.vue')
+  },
+  {
     path: '/booking/:id',
     name: 'Booking',
     component: () => import('../views/Booking.vue')
@@ -114,37 +124,43 @@ const routes: Array<RouteRecordRaw> = [
     path: '/profile',
     name: 'UserProfile',
     component: () => import('../views/user/Profile.vue'),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, feature: 'profile management' }
   },
   {
     path: '/messages',
     name: 'Messages',
     component: () => import('../views/Messages.vue'),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, allowAnonymous: true }
   },
   {
     path: '/settings',
     name: 'Settings',
     component: () => import('../views/Settings.vue'),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, feature: 'account settings' }
   },
   {
     path: '/settings/notifications',
     name: 'NotificationSettings',
     component: () => import('../views/NotificationSettings.vue'),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, feature: 'notification settings' }
   },
   {
     path: '/subscription',
     name: 'Subscription',
     component: () => import('../views/Subscription.vue'),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, feature: 'subscription management' }
   },
   {
     path: '/notifications',
     name: 'Notifications',
     component: () => import('../views/Notifications.vue'),
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, feature: 'notifications' }
+  },
+  {
+    path: '/test/city-dropdown',
+    name: 'TestCityDropdown',
+    component: () => import('../components/test/TestCityDropdown.vue'),
+    meta: { requiresAuth: false }
   },
   {
     path: '/escort/settings',
@@ -177,9 +193,15 @@ const routes: Array<RouteRecordRaw> = [
     meta: { requiresAuth: true, requiresEscort: true }
   },
   {
+    path: '/escort/profiles/:id',
+    name: 'ProfileDetail',
+    component: () => import('../views/escort/profiles/ProfileDetail.vue'),
+    meta: { requiresAuth: true, requiresEscort: true }
+  },
+  {
     path: '/escort/profiles/:id/edit',
     name: 'EditProfile',
-    component: () => import('../views/escort/profiles/EditProfile.vue'),
+    component: () => import('../views/escort/profiles/CreateProfile.vue'),
     meta: { requiresAuth: true, requiresEscort: true }
   },
   {
@@ -205,6 +227,11 @@ const routes: Array<RouteRecordRaw> = [
     name: 'EscortAdvertising',
     component: () => import('../views/escort/Advertising.vue'),
     meta: { requiresAuth: true, requiresEscort: true }
+  },
+  {
+    path: '/auth-test',
+    name: 'AuthTest',
+    component: () => import('../views/AuthTest.vue')
   },
   {
     path: '/:pathMatch(.*)*',
@@ -237,8 +264,17 @@ router.beforeEach(async (to, from, next) => {
     await authStore.init()
   }
   
+  // Check if user is anonymous
+  const isAnonymous = authStore.user?.prefs && (authStore.user.prefs as any).isAnonymous === true
+  
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
     next({ name: 'Login', query: { redirect: to.fullPath } })
+  } else if (to.meta.requiresAuth && isAnonymous && !to.meta.allowAnonymous) {
+    // Anonymous users trying to access protected routes (except allowed ones)
+    // Store intended destination and show upgrade prompt
+    sessionStorage.setItem('anonymousRedirect', to.fullPath)
+    sessionStorage.setItem('anonymousFeature', to.meta.feature as string || 'access this feature')
+    next({ name: 'Home', query: { upgrade: 'true' } })
   } else if (to.meta.requiresEscort) {
     // Check if user is escort
     const userRole = authStore.user?.prefs ? (authStore.user.prefs as any).userType : null
@@ -250,7 +286,7 @@ router.beforeEach(async (to, from, next) => {
   } else if (to.meta.requiresClient) {
     // Check if user is client
     const userRole = authStore.user?.prefs ? (authStore.user.prefs as any).userType : null
-    if (userRole !== 'client') {
+    if (userRole !== 'client' || isAnonymous) {
       next({ name: 'Home' })
     } else {
       next()

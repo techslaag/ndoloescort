@@ -43,8 +43,8 @@ const isRemoteVideoEnabled = ref(false)
 const isRemoteAudioEnabled = ref(false)
 
 // Timer
-let durationInterval: NodeJS.Timeout | null = null
-let controlsTimeout: NodeJS.Timeout | null = null
+let durationInterval: number | null = null
+let controlsTimeout: number | null = null
 
 // Computed properties
 const isIncoming = computed(() => props.call.receiverId === authStore.user?.$id)
@@ -149,7 +149,7 @@ const showControlsTemporarily = () => {
   }
   
   // Hide after 3 seconds of inactivity
-  controlsTimeout = setTimeout(() => {
+  controlsTimeout = window.setTimeout(() => {
     if (props.call.type === 'video' && props.call.status === 'active') {
       showControls.value = false
     }
@@ -238,7 +238,7 @@ const initializeAgora = async () => {
     }
     
     // Join channel
-    const appId = import.meta.env.VITE_AGORA_APP_ID
+    const appId = import.meta.env.VITE_AGORA_APP_ID as string
     if (!appId) {
       throw new Error('Agora App ID not configured')
     }
@@ -281,7 +281,7 @@ onMounted(async () => {
   await initializeAgora()
   
   // Start duration timer
-  durationInterval = setInterval(updateCallDuration, 1000)
+  durationInterval = window.setInterval(updateCallDuration, 1000)
   
   // Initial controls timeout for video calls
   if (props.call.type === 'video') {

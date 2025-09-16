@@ -1,7 +1,8 @@
 import { account, databases, DATABASE_ID, AUTH_SESSIONS_COLLECTION_ID, LOGIN_ATTEMPTS_COLLECTION_ID, SECURITY_EVENTS_COLLECTION_ID } from '../lib/appwrite'
-import { ID, Query } from 'appwrite'
+import { ID, Query, AuthenticationFactor, AuthenticatorType } from 'appwrite'
 import { encryptedStorageAdapter } from '../lib/encryption'
 import CryptoJS from 'crypto-js'
+import { notificationService } from './notificationService'
 
 export interface SecurityEvent {
   id: string
@@ -54,6 +55,33 @@ export interface SessionInfo {
 export class AuthEnhancementService {
   private maxLoginAttempts = 5
   private lockoutDuration = 15 * 60 * 1000 // 15 minutes
+
+  // Test Appwrite connection
+  async testConnection(): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Try to get account info without authentication - this will fail but confirm connectivity
+      await account.get()
+      return { success: true }
+    } catch (error: any) {
+      console.log('Connection test result:', error.type, error.message)
+      
+      // If we get a specific auth error, connection is working
+      if (error.type === 'general_unauthorized_scope' || error.type === 'user_unauthorized') {
+        return { success: true }
+      }
+      
+      // Network or configuration errors
+      if (error.message?.includes('fetch') || error.message?.includes('network')) {
+        return { success: false, error: 'Network connection failed. Please check your internet connection.' }
+      }
+      
+      if (error.type === 'project_unknown') {
+        return { success: false, error: 'Service configuration error. Please contact support.' }
+      }
+      
+      return { success: false, error: `Connection test failed: ${error.message}` }
+    }
+  }
   private sessionTimeout = 24 * 60 * 60 * 1000 // 24 hours
 
   // Enhanced login with security tracking
@@ -89,35 +117,90 @@ export class AuthEnhancementService {
         }
       }
 
-      // Attempt login
-      const session = await account.createEmailPasswordSession(email, password)
-      const user = await account.get()
+      // Attempt login - following the exact flow as MFA Debug Panel
+      try {
+        console.log('Attempting login for email:', email)
+        
+        // Step 1: Try to create email/password session
+        const session = await account.createEmailPasswordSession(email, password)
+        
+        // If we reach here, MFA was not required
+        console.log('Session created successfully without MFA')
+        const user = await account.get()
+        console.log('User retrieved:', user.email, 'MFA status:', user.mfa)
 
-      // Log successful login
-      await this.logLoginAttempt(email, ipAddress, userAgent, true)
-      await this.logSecurityEvent(user.$id, 'login', ipAddress, userAgent)
+        // Log successful login
+        await this.logLoginAttempt(email, ipAddress, userAgent, true)
+        await this.logSecurityEvent(user.$id, 'login', ipAddress, userAgent)
 
-      // Create session record
-      await this.createSessionRecord(user.$id, deviceInfo, ipAddress, rememberMe, userAgent)
+        // Create session record
+        await this.createSessionRecord(user.$id, deviceInfo, ipAddress, rememberMe, userAgent)
 
-      // Check for suspicious activity
-      const securityWarnings = await this.checkSuspiciousActivity(user.$id, ipAddress, userAgent)
+        // Check for suspicious activity
+        const securityWarnings = await this.checkSuspiciousActivity(user.$id, ipAddress, userAgent)
 
-      // Clear failed attempts on successful login
-      await this.clearFailedAttempts(email)
+        // Clear failed attempts on successful login
+        await this.clearFailedAttempts(email)
+        
+        // Send login alert notification if enabled
+        await this.sendLoginAlert(user.$id, ipAddress, userAgent, securityWarnings)
 
-      return {
-        success: true,
-        user,
-        securityWarnings
+        return {
+          success: true,
+          user,
+          securityWarnings
+        }
+      } catch (error: any) {
+        console.log('Login error:', {
+          message: error.message,
+          type: error.type,
+          code: error.code
+        })
+        
+        // Step 2: Check if MFA is required
+        if (error.type === 'user_more_factors_required') {
+          console.log('MFA is required for this account, creating challenge...')
+          
+          try {
+            // Step 3: Create MFA challenge
+            const challenge = await account.createMfaChallenge(AuthenticationFactor.Email)
+            sessionStorage.setItem('login_mfa_challenge_id', challenge.$id)
+            console.log('MFA challenge created:', challenge.$id)
+            
+            return {
+              success: false,
+              requiresMFA: true,
+              challengeId: challenge.$id,
+              message: 'A verification code has been sent to your email address.'
+            }
+          } catch (challengeError: any) {
+            console.error('Failed to create MFA challenge:', challengeError)
+            return {
+              success: false,
+              requiresMFA: true,
+              error: 'Failed to send MFA challenge. Please try again.'
+            }
+          }
+        }
+        
+        // Other errors - not MFA related
+        throw error
       }
     } catch (error: any) {
-      // Log failed login attempt
+      // Log failed login attempt with detailed error info
+      console.error('Enhanced login error:', {
+        message: error.message,
+        type: error.type,
+        code: error.code,
+        status: error.status,
+        response: error.response
+      })
+      
       await this.logLoginAttempt(email, ipAddress, userAgent, false, error.message)
 
       return {
         success: false,
-        error: this.sanitizeErrorMessage(error.message)
+        error: this.sanitizeErrorMessage(error.message || error.type || 'Unknown error')
       }
     }
   }
@@ -154,28 +237,34 @@ export class AuthEnhancementService {
     }
   }
 
-  // Two-Factor Authentication setup
+  // Two-Factor Authentication setup using Appwrite Email MFA
   async setupTwoFactorAuth(userId: string): Promise<{ 
     success: boolean
-    qrCode?: string
-    backupCodes?: string[]
+    message?: string
+    challengeId?: string
     error?: string 
   }> {
     try {
-      // Generate TOTP secret
-      const secret = this.generateTOTPSecret()
-      const qrCode = this.generateQRCode(userId, secret)
-      const backupCodes = this.generateBackupCodes()
-
-      // Store encrypted 2FA data
-      await this.store2FAData(userId, secret, backupCodes)
-
+      // First enable MFA for the user
+      await account.updateMFA(true)
+      console.log('MFA enabled for user')
+      
+      // Check current MFA status
+      const currentFactors = await account.listMfaFactors()
+      console.log('Current MFA factors before setup:', currentFactors)
+      
+      // For email-based 2FA, we need to create a challenge first
+      // This will send the verification code to the user's email
+      const challenge = await account.createMfaChallenge(AuthenticationFactor.Email)
+      console.log('MFA Email challenge created:', challenge)
+      
       return {
         success: true,
-        qrCode,
-        backupCodes
+        message: 'A verification code has been sent to your email address.',
+        challengeId: challenge.$id
       }
     } catch (error: any) {
+      console.error('MFA setup error:', error)
       return {
         success: false,
         error: error.message
@@ -183,26 +272,118 @@ export class AuthEnhancementService {
     }
   }
 
-  // Verify 2FA token
-  async verifyTwoFactorAuth(userId: string, token: string): Promise<{ success: boolean; error?: string }> {
+  // Verify 2FA token and complete MFA setup
+  async verifyAndEnableTwoFactorAuth(userId: string, token: string, challengeId?: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const secret = await this.get2FASecret(userId)
-      if (!secret) {
-        return { success: false, error: '2FA not set up' }
+      if (!challengeId) {
+        // If no challenge ID, we need to create one first
+        const challenge = await account.createMfaChallenge(AuthenticationFactor.Email)
+        challengeId = challenge.$id
+        console.log('Created new challenge:', challengeId)
       }
+      
+      // Complete the MFA challenge with the verification code
+      console.log('Completing MFA challenge with code:', token)
+      const result = await account.updateMfaChallenge(challengeId, token)
+      console.log('MFA challenge completion result:', result)
+      
+      // Check if MFA is now enabled
+      const factors = await account.listMfaFactors()
+      console.log('MFA factors after verification:', factors)
+      
+      return { success: true }
+    } catch (error: any) {
+      console.error('MFA verification error:', error)
+      return { success: false, error: error.message }
+    }
+  }
 
-      const isValid = this.verifyTOTPToken(secret, token)
-      if (!isValid) {
-        // Check if it's a backup code
-        const isBackupCode = await this.verifyBackupCode(userId, token)
-        if (!isBackupCode) {
-          return { success: false, error: 'Invalid token' }
+  // Disable 2FA
+  async disableTwoFactorAuth(userId: string, token?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (token) {
+        // If token provided, verify it first
+        const challengeId = sessionStorage.getItem('mfa_disable_challenge_id')
+        if (challengeId) {
+          await account.updateMfaChallenge(challengeId, token)
+          sessionStorage.removeItem('mfa_disable_challenge_id')
         }
       }
+      
+      // Disable MFA
+      await account.updateMFA(false)
+      console.log('MFA disabled for user')
+      
+      return { success: true }
+    } catch (error: any) {
+      console.error('MFA disable error:', error)
+      return { success: false, error: error.message }
+    }
+  }
 
+  // List MFA factors
+  async listMfaFactors(): Promise<{ success: boolean; factors?: any; error?: string }> {
+    try {
+      const factors = await account.listMfaFactors()
+      console.log('Raw MFA factors response:', JSON.stringify(factors))
+      return { success: true, factors: factors }
+    } catch (error: any) {
+      console.error('Error listing MFA factors:', error)
+      return { success: false, error: error.message }
+    }
+  }
+
+  // Create MFA challenge (for login)
+  async createMfaChallenge(): Promise<{ success: boolean; challengeId?: string; error?: string }> {
+    try {
+      const challenge = await account.createMfaChallenge(AuthenticationFactor.Email)
+      return { success: true, challengeId: challenge.$id }
+    } catch (error: any) {
+      return { success: false, error: error.message }
+    }
+  }
+
+  // Complete MFA challenge (for login)
+  async completeMfaChallenge(challengeId: string, token: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      await account.updateMfaChallenge(challengeId, token)
       return { success: true }
     } catch (error: any) {
       return { success: false, error: error.message }
+    }
+  }
+
+  // Verify Two-Factor Authentication during login - matching debug panel flow
+  async verifyTwoFactorAuth(userId: string, token: string): Promise<{ success: boolean; user?: any; error?: string }> {
+    try {
+      const challengeId = sessionStorage.getItem('login_mfa_challenge_id')
+      
+      if (!challengeId) {
+        return { 
+          success: false, 
+          error: 'No MFA challenge found. Please try logging in again.' 
+        }
+      }
+      
+      console.log(`Verifying MFA code: ${token.slice(0, 3)}*** with challenge: ${challengeId}`)
+      
+      // Complete the MFA challenge - this completes the login
+      await account.updateMfaChallenge(challengeId, token)
+      console.log('MFA verification successful!')
+      
+      // Clear the challenge ID
+      sessionStorage.removeItem('login_mfa_challenge_id')
+      
+      // Get the logged in user
+      const user = await account.get()
+      console.log(`Logged in as: ${user.email}`)
+      console.log(`User ID: ${user.$id}`)
+      console.log(`MFA enabled: ${user.mfa}`)
+      
+      return { success: true, user }
+    } catch (error: any) {
+      console.error('MFA verification failed:', error)
+      return { success: false, error: error.message || 'Invalid verification code' }
     }
   }
 
@@ -281,7 +462,7 @@ export class AuthEnhancementService {
   }
 
   // Security event logging
-  private async logSecurityEvent(
+  async logSecurityEvent(
     userId: string,
     type: SecurityEvent['eventType'],
     ipAddress: string,
@@ -435,7 +616,7 @@ export class AuthEnhancementService {
   }
 
   // Get client IP address
-  private async getClientIP(): Promise<string> {
+  async getClientIP(): Promise<string> {
     try {
       const response = await fetch('https://api.ipify.org?format=json')
       const data = await response.json()
@@ -585,15 +766,26 @@ export class AuthEnhancementService {
       'Invalid credentials': 'Invalid email or password',
       'User (role: guests) missing scope (account)': 'Authentication required',
       'Rate limit exceeded': 'Too many attempts. Please try again later.',
-      'User not found': 'Invalid email or password' // Don't reveal if user exists
+      'User not found': 'Invalid email or password', // Don't reveal if user exists
+      'Network Error': 'Connection error. Please check your internet connection.',
+      'Failed to fetch': 'Connection error. Please check your internet connection.',
+      'user_invalid_credentials': 'Invalid email or password',
+      'user_blocked': 'Your account has been blocked. Please contact support.',
+      'user_not_found': 'Invalid email or password',
+      'general_unknown_origin': 'Service temporarily unavailable. Please try again.',
+      'project_unknown': 'Service configuration error. Please contact support.'
+    }
+
+    // Handle Appwrite error format
+    if (message.includes('Invalid credentials') || message.includes('user_invalid_credentials')) {
+      return 'Invalid email or password'
+    }
+    
+    if (message.includes('network') || message.includes('fetch')) {
+      return 'Connection error. Please check your internet connection and try again.'
     }
 
     return sanitizedMessages[message] || 'Authentication failed. Please try again.'
-  }
-
-  // TOTP-related methods (simplified implementations)
-  private generateTOTPSecret(): string {
-    return CryptoJS.lib.WordArray.random(20).toString()
   }
 
   private generateSessionToken(): string {
@@ -630,85 +822,14 @@ export class AuthEnhancementService {
     return baseDescription
   }
 
-  private generateQRCode(userId: string, secret: string): string {
-    const issuer = 'Elite Escorts'
-    const label = `${issuer}:${userId}`
-    return `otpauth://totp/${label}?secret=${secret}&issuer=${issuer}`
-  }
-
-  private generateBackupCodes(): string[] {
-    return Array.from({ length: 10 }, () => 
-      Math.random().toString(36).substring(2, 10).toUpperCase()
-    )
-  }
-
-  private async store2FAData(userId: string, secret: string, backupCodes: string[]): Promise<void> {
-    // Store encrypted 2FA data
-    const encryptedData = encryptedStorageAdapter.encrypt(JSON.stringify({
-      secret,
-      backupCodes,
-      enabled: true
-    }))
-
-    // Store in user preferences or separate collection
-    await account.updatePrefs({
-      twoFactorAuth: encryptedData
-    })
-  }
-
-  private async get2FASecret(userId: string): Promise<string | null> {
-    try {
-      const user = await account.get()
-      const twoFactorData = user.prefs?.twoFactorAuth
-      if (!twoFactorData) return null
-
-      const decrypted = encryptedStorageAdapter.decrypt(twoFactorData)
-      const data = JSON.parse(decrypted)
-      return data.secret
-    } catch (error) {
-      return null
-    }
-  }
-
-  private verifyTOTPToken(secret: string, token: string): boolean {
-    // Simplified TOTP verification - in production use a proper TOTP library
-    // This is just a placeholder
-    return token.length === 6 && /^\d+$/.test(token)
-  }
-
-  private async verifyBackupCode(userId: string, code: string): Promise<boolean> {
-    try {
-      const user = await account.get()
-      const twoFactorData = user.prefs?.twoFactorAuth
-      if (!twoFactorData) return false
-
-      const decrypted = encryptedStorageAdapter.decrypt(twoFactorData)
-      const data = JSON.parse(decrypted)
-      
-      const codeIndex = data.backupCodes.indexOf(code)
-      if (codeIndex === -1) return false
-
-      // Remove used backup code
-      data.backupCodes.splice(codeIndex, 1)
-      const encryptedData = encryptedStorageAdapter.encrypt(JSON.stringify(data))
-      await account.updatePrefs({ twoFactorAuth: encryptedData })
-
-      return true
-    } catch (error) {
-      return false
-    }
-  }
-
   private async is2FAEnabled(userId: string): Promise<boolean> {
     try {
-      const user = await account.get()
-      const twoFactorData = user.prefs?.twoFactorAuth
-      if (!twoFactorData) return false
-
-      const decrypted = encryptedStorageAdapter.decrypt(twoFactorData)
-      const data = JSON.parse(decrypted)
-      return data.enabled === true
+      const factors = await account.listMfaFactors()
+      console.log('Checking 2FA status, factors:', factors)
+      // Check if email MFA is enabled (not array-based)
+      return factors.email === true
     } catch (error) {
+      console.error('Error checking 2FA status:', error)
       return false
     }
   }
@@ -769,6 +890,68 @@ export class AuthEnhancementService {
       'password123', 'admin', 'letmein', 'welcome', 'monkey'
     ]
     return commonPasswords.includes(password.toLowerCase())
+  }
+
+  // Send login alert notification
+  private async sendLoginAlert(
+    userId: string,
+    ipAddress: string,
+    userAgent: string,
+    securityWarnings: string[]
+  ): Promise<void> {
+    try {
+      // Check if user has login alerts enabled
+      const user = await account.get()
+      const prefs = user.prefs as any
+      const loginAlertsEnabled = prefs?.security?.loginAlerts !== false // Default to true
+      
+      if (!loginAlertsEnabled) {
+        console.log('Login alerts disabled for user')
+        return
+      }
+      
+      // Get location from IP (you could integrate with an IP geolocation service)
+      const location = await this.getLocationFromIP(ipAddress)
+      
+      // Check if this is a new device
+      const isNewDevice = securityWarnings.some(warning => 
+        warning.toLowerCase().includes('new device')
+      )
+      
+      // Send notification
+      await notificationService.notifyLoginAlert(
+        userId,
+        ipAddress,
+        userAgent,
+        location,
+        isNewDevice
+      )
+      
+      console.log('Login alert notification sent')
+    } catch (error) {
+      console.error('Failed to send login alert:', error)
+      // Don't throw - this is a non-critical feature
+    }
+  }
+  
+  // Get location from IP address (simplified - you'd use a real geolocation service)
+  private async getLocationFromIP(ipAddress: string): Promise<string> {
+    try {
+      // In production, you'd use a service like ipapi.co or ipgeolocation.io
+      // For now, just return a placeholder
+      if (ipAddress === 'unknown' || ipAddress === '127.0.0.1') {
+        return 'Local Network'
+      }
+      
+      // You could make an API call here:
+      // const response = await fetch(`https://ipapi.co/${ipAddress}/json/`)
+      // const data = await response.json()
+      // return `${data.city}, ${data.country_name}`
+      
+      return 'Unknown Location'
+    } catch (error) {
+      return 'Unknown Location'
+    }
   }
 }
 

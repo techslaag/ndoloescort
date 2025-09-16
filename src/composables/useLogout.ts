@@ -6,7 +6,8 @@ import { realtimeService } from '../services/realtimeService'
 export interface LogoutOptions {
   redirectTo?: string
   showMessage?: boolean
-  reason?: 'user_action' | 'session_expired' | 'account_deleted' | 'security'
+  reason?: 'user_action' | 'session_expired' | 'account_deleted' | 'security' | 'anonymous_logout'
+  customMessage?: string
 }
 
 export function useLogout() {
@@ -54,6 +55,10 @@ export function useLogout() {
           case 'security':
             message = 'You have been logged out for security reasons.'
             queryParams.security = 'true'
+            break
+          case 'anonymous_logout':
+            message = options.customMessage || 'Anonymous session ended. All data has been permanently deleted.'
+            queryParams.anonymous = 'true'
             break
         }
 

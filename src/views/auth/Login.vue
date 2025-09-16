@@ -2,12 +2,16 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import { useToast } from '../../composables/useToast'
 import { account } from '../../lib/appwrite'
+import { handleAppwriteError } from '../../utils/appwriteErrors'
+import { authEnhancementService } from '../../services/authEnhancementService'
 import ErrorAlert from '../../components/ErrorAlert.vue'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const { success, error: showError } = useToast()
 
 const form = ref({
   email: '',
@@ -20,11 +24,25 @@ const isAnonymousLoading = ref(false)
 const showPassword = ref(false)
 
 // Initialize remembered credentials
-onMounted(() => {
+onMounted(async () => {
   const { rememberMe, userEmail } = authStore.getRememberedCredentials()
   if (rememberMe && userEmail) {
     form.value.rememberMe = true
     form.value.email = userEmail
+  }
+  
+  // Test Appwrite connection on page load (in development only)
+  if (import.meta.env.DEV) {
+    try {
+      const connectionTest = await authEnhancementService.testConnection()
+      if (!connectionTest.success) {
+        console.warn('Appwrite connection issue:', connectionTest.error)
+      } else {
+        console.log('Appwrite connection successful')
+      }
+    } catch (error) {
+      console.error('Connection test failed:', error)
+    }
   }
 })
 
@@ -58,12 +76,28 @@ const handleLogin = async () => {
     isLoading.value = true
     authStore.clearError()
     
+    // Test connection before attempting login
+    const connectionTest = await authEnhancementService.testConnection()
+    if (!connectionTest.success) {
+      authStore.setError(connectionTest.error || 'Connection failed', true)
+      return
+    }
+    
+    console.log('Starting login attempt for:', form.value.email)
     const result = await authStore.signin(form.value.email, form.value.password, form.value.rememberMe)
+    console.log('Login result:', result)
     
     if (result.success) {
       // Check if user is an escort and redirect to dashboard
-      const userType = authStore.user?.prefs?.userType
+      const userType = (authStore.user?.prefs as any)?.userType
       const redirectTo = route.query.redirect as string
+      
+      // Check for security warnings
+      if (result.securityWarnings && result.securityWarnings.length > 0) {
+        result.securityWarnings.forEach(warning => {
+          showError(warning)
+        })
+      }
       
       if (userType === 'escort') {
         // Escorts always go to dashboard, unless redirecting to another escort route
@@ -76,6 +110,18 @@ const handleLogin = async () => {
         // Clients go to redirect path or home
         router.push(redirectTo || '/')
       }
+    } else if (result.requiresMFA) {
+      // Redirect to verification code page for MFA
+      const redirectPath = route.query.redirect as string || '/'
+      router.push({
+        path: '/verification-code',
+        query: {
+          type: 'login',
+          email: form.value.email,
+          redirect: redirectPath
+        }
+      })
+      success((result as any).message || 'Verification code sent to your email')
     }
   } catch (err) {
     console.error('Login error:', err)
@@ -83,6 +129,7 @@ const handleLogin = async () => {
     isLoading.value = false
   }
 }
+
 
 const handleAnonymousLogin = async () => {
   try {
@@ -93,31 +140,24 @@ const handleAnonymousLogin = async () => {
     const session = await account.createAnonymousSession()
     
     if (session) {
-      // Set user as anonymous client in store
-      authStore.setAnonymousUser({
-        $id: session.userId,
-        $createdAt: new Date().toISOString(),
-        $updatedAt: new Date().toISOString(),
-        name: 'Anonymous Client',
-        email: '',
-        phone: '',
-        registration: new Date().toISOString(),
-        status: true,
-        labels: ['anonymous', 'client'],
-        passwordUpdate: new Date().toISOString(),
-        emailVerification: false,
-        phoneVerification: false,
-        mfa: false,
-        accessedAt: new Date().toISOString(),
-        prefs: {},
-        targets: []
+      // Update preferences to mark as client
+      await account.updatePrefs({
+        userType: 'client',
+        isAnonymous: true,
+        registrationDate: new Date().toISOString()
       })
+      
+      // Get the anonymous user data AFTER updating preferences
+      const anonymousUser = await account.get()
+      
+      // Set user in auth store
+      authStore.setAnonymousUser(anonymousUser)
       
       router.push('/')
     }
   } catch (err) {
     console.error('Anonymous login error:', err)
-    authStore.setError('Failed to login anonymously. Please try again.', true)
+    authStore.setError(handleAppwriteError(err, 'anonymousLogin'), true)
   } finally {
     isAnonymousLoading.value = false
   }
@@ -210,7 +250,9 @@ const handleErrorClear = () => {
         :disabled="isAnonymousLoading"
         @click="handleAnonymousLogin"
       >
-        <img src="/src/assets/images/icon/anonymous.svg" alt="Anonymous" width="20" height="20" />
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM7.07 18.28c.43-.9 3.05-1.78 4.93-1.78s4.51.88 4.93 1.78C15.57 19.36 13.86 20 12 20s-3.57-.64-4.93-1.72zm11.29-1.45c-1.43-1.74-4.9-2.33-6.36-2.33s-4.93.59-6.36 2.33A7.95 7.95 0 014 12c0-4.41 3.59-8 8-8s8 3.59 8 8c0 1.82-.62 3.49-1.64 4.83zM12 6c-1.94 0-3.5 1.56-3.5 3.5S10.06 13 12 13s3.5-1.56 3.5-3.5S13.94 6 12 6zm0 5c-.83 0-1.5-.67-1.5-1.5S11.17 8 12 8s1.5.67 1.5 1.5S12.83 11 12 11z" fill="currentColor"/>
+        </svg>
         <span v-if="isAnonymousLoading">Logging in...</span>
         <span v-else>Login Anonymously as Client</span>
       </button>
@@ -456,6 +498,7 @@ const handleErrorClear = () => {
     }
   }
 }
+
 
 @media (max-width: 480px) {
   .social-buttons {

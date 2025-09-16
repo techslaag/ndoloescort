@@ -7,6 +7,7 @@ import { useMessagingStore } from '../../stores/messaging'
 import ErrorAlert from '../../components/ErrorAlert.vue'
 import ProfileVerificationButton from '../../components/escort/ProfileVerificationButton.vue'
 import DeleteProfileModal from '../../components/modals/DeleteProfileModal.vue'
+import ProfileCompletionStatus from '../../components/profile/ProfileCompletionStatus.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -129,12 +130,26 @@ const confirmDeleteProfile = async () => {
   if (!profileToDelete.value) return
   
   const profileId = profileToDelete.value.$id || profileToDelete.value.id
-  const profileName = profileToDelete.value.name
+  const profileName = profileToDelete.value.name || 'Unnamed Profile'
   
-  console.log('Attempting to delete profile:', { profileId, profileName, profile: profileToDelete.value })
+  console.log('=== confirmDeleteProfile START ===')
+  console.log('Attempting to delete profile:', { 
+    profileId, 
+    profileName, 
+    profile: profileToDelete.value,
+    hasId: !!profileId,
+    profileData: JSON.stringify(profileToDelete.value)
+  })
+  
+  if (!profileId) {
+    console.error('No profile ID found')
+    profileStore.setError('Cannot delete profile: No profile ID found')
+    return
+  }
   
   try {
     isDeletingProfile.value = true
+    console.log('Calling profileStore.deleteProfile...')
     const result = await profileStore.deleteProfile(profileId)
     console.log('Delete result:', result)
     
@@ -148,22 +163,30 @@ const confirmDeleteProfile = async () => {
       alert(result.message)
     }
     
-    // Reload profiles to update the list
-    if (authStore.user) {
-      await profileStore.fetchUserProfiles(authStore.user.$id)
-    }
+    console.log('Success! Not reloading profiles - they should be updated automatically')
+    // Don't reload - the store should have already updated the list
+    // Commenting out the reload to see if the reactive update works
+    // if (authStore.user) {
+    //   await profileStore.fetchUserProfiles(authStore.user.$id)
+    // }
   } catch (error: any) {
+    console.error('=== confirmDeleteProfile ERROR ===')
     console.error('Error deleting profile:', error)
     console.error('Error details:', {
       message: error.message,
       code: error.code,
       type: error.type,
-      response: error.response
+      response: error.response,
+      stack: error.stack
     })
     // Show error to user
     profileStore.setError(`Failed to delete profile: ${error.message || 'Unknown error'}`)
+    
+    // Also show an alert for immediate feedback
+    alert(`Failed to delete profile: ${error.message || 'Unknown error'}`)
   } finally {
     isDeletingProfile.value = false
+    console.log('=== confirmDeleteProfile END ===')
   }
 }
 
@@ -171,6 +194,26 @@ const closeDeleteModal = () => {
   if (!isDeletingProfile.value) {
     showDeleteModal.value = false
     profileToDelete.value = null
+  }
+}
+
+// Test function for direct deletion without modal
+const testDirectDelete = async (profile: any) => {
+  const profileId = profile.$id || profile.id
+  console.log('=== TEST DIRECT DELETE ===')
+  console.log('Profile to delete:', { profileId, name: profile.name })
+  
+  if (!confirm(`Are you sure you want to delete ${profile.name || 'this profile'}?`)) {
+    return
+  }
+  
+  try {
+    const result = await profileStore.deleteProfile(profileId)
+    console.log('Direct delete successful:', result)
+    alert('Profile deleted successfully!')
+  } catch (error: any) {
+    console.error('Direct delete failed:', error)
+    alert(`Delete failed: ${error.message}`)
   }
 }
 
@@ -296,6 +339,14 @@ const closeDeleteModal = () => {
             </div>
           </div>
           
+          <!-- Profile Completion Status -->
+          <ProfileCompletionStatus 
+            :profile="profile"
+            :show-steps="false"
+            :show-actions="false"
+            :show-missing-fields="false"
+          />
+          
           <!-- Quick Actions -->
           <div class="quick-actions">
             <button @click="viewAnalytics((profile as any).$id || (profile as any).id)" class="action-btn primary">
@@ -347,6 +398,16 @@ const closeDeleteModal = () => {
                 <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
               </svg>
             </button>
+            
+            <!-- Test direct delete button -->
+            <button 
+              @click="testDirectDelete(profile)" 
+              class="test-delete-btn"
+              title="Test direct delete"
+              style="background: #f00; color: white; padding: 4px 8px; border-radius: 4px; font-size: 10px; margin-left: 4px;"
+            >
+              TEST
+            </button>
           </div>
         </div>
       </div>
@@ -370,6 +431,14 @@ const closeDeleteModal = () => {
   padding: var(--spacing-xl);
   max-width: 1200px;
   margin: 0 auto;
+  
+  @media (max-width: 768px) {
+    padding: var(--spacing-lg) var(--spacing-md);
+  }
+  
+  @media (max-width: 480px) {
+    padding: var(--spacing-md);
+  }
 }
 
 .profiles-header {
@@ -378,8 +447,28 @@ const closeDeleteModal = () => {
   align-items: center;
   margin-bottom: var(--spacing-xxl);
   
+  @media (max-width: 768px) {
+    margin-bottom: var(--spacing-xl);
+    flex-direction: column;
+    gap: var(--spacing-md);
+    text-align: center;
+  }
+  
+  @media (max-width: 480px) {
+    margin-bottom: var(--spacing-lg);
+    gap: var(--spacing-sm);
+  }
+  
   h1 {
     color: var(--color-text-dark);
+    
+    @media (max-width: 768px) {
+      font-size: 2rem;
+    }
+    
+    @media (max-width: 480px) {
+      font-size: 1.75rem;
+    }
   }
 }
 
@@ -395,14 +484,31 @@ const closeDeleteModal = () => {
   background: var(--color-background-alt);
   border-radius: var(--border-radius-lg);
   
+  @media (max-width: 768px) {
+    padding: var(--spacing-xl);
+  }
+  
+  @media (max-width: 480px) {
+    padding: var(--spacing-lg);
+  }
+  
   h3 {
     color: var(--color-text-dark);
     margin-bottom: var(--spacing-sm);
+    
+    @media (max-width: 480px) {
+      font-size: 1.25rem;
+    }
   }
   
   p {
     color: var(--color-text-light);
     margin-bottom: var(--spacing-lg);
+    
+    @media (max-width: 480px) {
+      font-size: 0.95rem;
+      margin-bottom: var(--spacing-md);
+    }
   }
 }
 
@@ -498,8 +604,15 @@ const closeDeleteModal = () => {
   .profile-header {
     margin-bottom: var(--spacing-lg);
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: var(--spacing-md);
+    
+    @media (max-width: 480px) {
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: var(--spacing-sm);
+    }
     
     .profile-avatar-section {
       position: relative;
@@ -564,6 +677,11 @@ const closeDeleteModal = () => {
         display: flex;
         gap: var(--spacing-md);
         flex-wrap: wrap;
+        
+        @media (max-width: 480px) {
+          justify-content: center;
+          gap: var(--spacing-sm);
+        }
         
         .detail-item {
           display: flex;
@@ -832,6 +950,14 @@ const closeDeleteModal = () => {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
+  min-height: 48px;
+  
+  @media (max-width: 768px) {
+    width: 100%;
+    padding: 10px 20px;
+    font-size: 0.95rem;
+    min-height: 44px;
+  }
   
   &.btn-primary {
     background-color: var(--color-accent);
@@ -863,10 +989,12 @@ const closeDeleteModal = () => {
     }
     
     .profile-header {
-      .profile-avatar {
-        width: 60px;
-        height: 60px;
-        margin-top: -30px;
+      .profile-avatar-section {
+        .profile-avatar {
+          width: 60px;
+          height: 60px;
+          margin-top: -30px;
+        }
       }
       
       .profile-info {
@@ -911,6 +1039,149 @@ const closeDeleteModal = () => {
   }
 }
 
+// Small Mobile Responsive Design
+@media (max-width: 480px) {
+  .profiles-grid {
+    gap: var(--spacing-sm);
+  }
+  
+  .profile-card {
+    min-height: 420px;
+    
+    .card-background {
+      height: 120px;
+    }
+    
+    .profile-content {
+      padding: var(--spacing-sm);
+      padding-top: 80px;
+    }
+    
+    .profile-header {
+      margin-bottom: var(--spacing-md);
+      
+      .profile-avatar-section {
+        .profile-avatar {
+          width: 50px;
+          height: 50px;
+          margin-top: -25px;
+          
+          .verified-badge {
+            width: 20px;
+            height: 20px;
+            
+            svg {
+              width: 12px;
+              height: 12px;
+            }
+          }
+        }
+      }
+      
+      .profile-info {
+        .profile-name {
+          font-size: 1rem;
+          margin-bottom: var(--spacing-xs);
+        }
+        
+        .profile-details {
+          .detail-item {
+            font-size: 0.8rem;
+            
+            svg {
+              width: 12px;
+              height: 12px;
+            }
+          }
+        }
+      }
+      
+      .profile-status-section {
+        .status-indicator {
+          font-size: 0.7rem;
+          padding: 3px 8px;
+          
+          .status-dot {
+            width: 5px;
+            height: 5px;
+          }
+        }
+      }
+    }
+    
+    .profile-stats {
+      padding: var(--spacing-sm) 0;
+      margin-bottom: var(--spacing-sm);
+      
+      .stat-item {
+        .stat-value {
+          font-size: 0.9rem;
+        }
+        
+        .stat-label {
+          font-size: 0.65rem;
+        }
+      }
+    }
+    
+    .quick-actions {
+      flex-direction: column;
+      gap: var(--spacing-xs);
+      
+      .action-btn {
+        padding: 10px;
+        font-size: 0.85rem;
+        min-height: 40px;
+        
+        svg {
+          width: 16px;
+          height: 16px;
+        }
+        
+        &.has-unread {
+          .unread-count {
+            font-size: 0.65rem;
+            padding: 1px 4px;
+            min-width: 16px;
+          }
+        }
+      }
+    }
+    
+    .profile-footer {
+      padding: var(--spacing-xs) var(--spacing-sm);
+      
+      .footer-actions {
+        flex-direction: column;
+        gap: var(--spacing-xs);
+        
+        .toggle-status-btn {
+          width: 100%;
+          justify-content: center;
+          font-size: 0.8rem;
+          padding: 6px 12px;
+          min-height: 36px;
+          
+          svg {
+            width: 14px;
+            height: 14px;
+          }
+        }
+        
+        .delete-btn {
+          align-self: center;
+          padding: 8px;
+          
+          svg {
+            width: 14px;
+            height: 14px;
+          }
+        }
+      }
+    }
+  }
+}
+
 // Tablet Responsive Design
 @media (min-width: 769px) and (max-width: 1024px) {
   .profiles-grid {
@@ -926,45 +1197,45 @@ const closeDeleteModal = () => {
   }
 }
 
-// Dark Mode Support (if implemented)
-@media (prefers-color-scheme: dark) {
-  .profile-card {
-    background: #1f2937;
-    border-color: #374151;
-    
-    .profile-info {
-      .profile-name {
-        color: #f9fafb;
-      }
-      
-      .profile-details .detail-item {
-        color: #9ca3af;
-      }
-    }
-    
-    .profile-stats {
-      border-color: #374151;
-      
-      .stat-value {
-        color: #f9fafb;
-      }
-    }
-    
-    .quick-actions .action-btn {
-      background: #374151;
-      border-color: #4b5563;
-      color: #d1d5db;
-      
-      &:hover {
-        background: #4b5563;
-        color: #f9fafb;
-      }
-    }
-    
-    .profile-footer {
-      background: #111827;
-      border-color: #374151;
-    }
-  }
-}
+// Dark Mode Support - Disabled to keep cards white
+// @media (prefers-color-scheme: dark) {
+//   .profile-card {
+//     background: #1f2937;
+//     border-color: #374151;
+//     
+//     .profile-info {
+//       .profile-name {
+//         color: #f9fafb;
+//       }
+//       
+//       .profile-details .detail-item {
+//         color: #9ca3af;
+//       }
+//     }
+//     
+//     .profile-stats {
+//       border-color: #374151;
+//       
+//       .stat-value {
+//         color: #f9fafb;
+//       }
+//     }
+//     
+//     .quick-actions .action-btn {
+//       background: #374151;
+//       border-color: #4b5563;
+//       color: #d1d5db;
+//       
+//       &:hover {
+//         background: #4b5563;
+//         color: #f9fafb;
+//       }
+//     }
+//     
+//     .profile-footer {
+//       background: #111827;
+//       border-color: #374151;
+//     }
+//   }
+// }
 </style> 

@@ -6,6 +6,7 @@ import './assets/styles/main.scss'
 import App from './App.vue'
 import { useAuthStore } from './stores/auth'
 import { realtimeService } from './services/realtimeService'
+import { initSessionMiddleware, destroySessionMiddleware } from './middleware/sessionMiddleware'
 
 const pinia = createPinia()
 pinia.use(piniaPluginPersistedstate)
@@ -25,12 +26,21 @@ authStore.init().then(() => {
   if (authStore.isAuthenticated) {
     realtimeService.subscribeToConversations()
     realtimeService.subscribeToCalls()
+    
+    // Initialize session monitoring
+    initSessionMiddleware()
   }
 })
 
-// Clean up realtime subscriptions on app unmount
-app.unmount = () => {
+// Clean up on app unmount
+window.addEventListener('beforeunload', () => {
   realtimeService.unsubscribeAll()
-}
+  destroySessionMiddleware()
+})
+
+// Listen for auth state changes
+window.addEventListener('user-logout', () => {
+  destroySessionMiddleware()
+})
 
 app.mount('#app')

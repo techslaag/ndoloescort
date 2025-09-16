@@ -1,18 +1,27 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, reactive, watch, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../../../stores/auth'
 import { useProfileStore } from '../../../stores/profile'
 import { useSubscriptionStore } from '../../../stores/subscription'
 import ErrorAlert from '../../../components/ErrorAlert.vue'
-import LocationDropdowns from '../../../components/forms/LocationDropdowns.vue'
+import LocationDropdowns from '../../../components/forms/LocationDropdownsOptimized.vue'
+import ProfileActivationModal from '../../../components/profile/ProfileActivationModal.vue'
 import { availableServices } from '../../../constants/services'
+import { validateProfileCompletion } from '../../../utils/profileValidation'
+import { profileService } from '../../../services/profileService'
 import type { ProfileFormData } from '../../../types/profile'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 const profileStore = useProfileStore()
 const subscriptionStore = useSubscriptionStore()
+
+// Determine if we're in edit mode
+const profileId = computed(() => route.params.id as string | undefined)
+const isEditMode = computed(() => !!profileId.value)
+const profile = ref<any>(null)
 
 const isLoading = ref(false)
 const isSaving = ref(false)
@@ -29,6 +38,9 @@ const selectedServices = ref<string[]>([])
 const serviceDescriptions = ref<Record<string, string>>({})
 const fileInput = ref<HTMLInputElement | null>(null)
 const draftProfileId = ref<string | null>(null)
+const showActivationModal = ref(false)
+const initialDataLoaded = ref(false)
+const locationDropdownsKey = ref(0)
 
 const steps = computed(() => [
   { 
@@ -81,6 +93,9 @@ const form = reactive<ProfileFormData>({
     state: '',
     country: ''
   },
+  locationCity: '',
+  locationState: '',
+  locationCountry: '',
   description: '',
   bio: '',
   services: [],
@@ -125,8 +140,129 @@ const userRole = computed(() => {
 const isEscort = computed(() => userRole.value === 'escort')
 
 const profilesRemaining = computed(() => subscriptionStore.profilesRemaining)
-const canCreateNewProfile = computed(() => subscriptionStore.canCreateProfile)
 const subscriptionPlan = computed(() => subscriptionStore.currentPlan)
+
+// Load profile data when in edit mode
+const loadProfile = async () => {
+  if (!profileId.value) return
+  
+  try {
+    isLoading.value = true
+    const fetchedProfile = await profileStore.fetchProfile(profileId.value)
+    profile.value = fetchedProfile || profileStore.profiles.find(p => p.id === profileId.value || (p as any).$id === profileId.value)
+    
+    console.log('CreateProfile: Fetched profile data:', {
+      profileId: profileId.value,
+      fetchedProfile,
+      foundInStore: profileStore.profiles.find(p => p.id === profileId.value || (p as any).$id === profileId.value),
+      allKeys: profile.value ? Object.keys(profile.value) : 'NO PROFILE'
+    })
+    
+    if (!profile.value) {
+      authStore.setError('Profile not found')
+      router.push('/escort/profiles')
+      return
+    }
+    
+    // Set draftProfileId for updates
+    draftProfileId.value = profileId.value
+    
+    // Populate form with existing data
+    form.name = profile.value.name || ''
+    form.age = profile.value.age?.toString() || ''
+    
+    // Set location data - handle both nested and flat structures
+    const locationData = {
+      city: profile.value.locationCity || profile.value.location?.city || '',
+      state: profile.value.locationState || profile.value.location?.state || '',
+      country: profile.value.locationCountry || profile.value.location?.country || ''
+    }
+    
+    console.log('CreateProfile: Loading location data:', {
+      profileData: {
+        locationCity: profile.value.locationCity,
+        locationState: profile.value.locationState, 
+        locationCountry: profile.value.locationCountry,
+        nestedLocation: profile.value.location,
+        allLocationFields: Object.keys(profile.value).filter(key => key.toLowerCase().includes('location'))
+      },
+      extractedLocation: locationData
+    })
+    
+    // Set both nested and flat structure immediately
+    form.locationCity = locationData.city
+    form.locationState = locationData.state
+    form.locationCountry = locationData.country
+    form.location = { ...locationData }
+    
+    console.log('CreateProfile: Set form location data:', form.location)
+    
+    form.description = profile.value.description || ''
+    form.bio = profile.value.bio || ''
+    
+    // Parse working hours if stored as JSON string
+    if (profile.value.workingHours) {
+      if (typeof profile.value.workingHours === 'string') {
+        form.workingHours = JSON.parse(profile.value.workingHours)
+      } else {
+        form.workingHours = profile.value.workingHours
+      }
+    }
+    
+    // Load preferences
+    form.preferences = {
+      autoApproveBookings: profile.value.preferencesAutoApproveBookings || false,
+      requireDeposit: profile.value.preferencesRequireDeposit || false,
+      depositPercentage: profile.value.preferencesDepositPercentage?.toString() || '30',
+      cancellationPolicy: profile.value.preferencesCancellationPolicy || '24 hours notice required for cancellation',
+      minimumNotice: profile.value.preferencesMinimumNotice?.toString() || '2'
+    }
+    
+    // Load services
+    if (profile.value.services && profile.value.services.length > 0) {
+      selectedServices.value = profile.value.services.map((s: any) => s.category || s.value)
+      profile.value.services.forEach((service: any) => {
+        if (service.category) {
+          serviceDescriptions.value[service.category] = service.description || ''
+        }
+      })
+    }
+    
+    // Load pricing
+    if (profile.value.pricing && profile.value.pricing.length > 0) {
+      form.pricing = profile.value.pricing.map((p: any) => ({
+        type: p.type,
+        amount: p.amount?.toString() || '',
+        description: p.description || ''
+      }))
+    }
+    
+    // Load media
+    if (profile.value.media && profile.value.media.length > 0) {
+      uploadedFiles.value = profile.value.media.map((m: any) => ({
+        file: null,
+        preview: m.url || m.thumbnailUrl,
+        blur: m.isBlurred || false,
+        id: m.id || m.$id,
+        existing: true
+      }))
+    }
+    
+    initialDataLoaded.value = true
+    
+    // Force LocationDropdowns to re-render with the updated data
+    locationDropdownsKey.value++
+    await nextTick()
+    console.log('CreateProfile: Data loaded, LocationDropdowns should now initialize with:', form.location)
+    
+  } catch (error) {
+    console.error('Error loading profile:', error)
+    authStore.setError('Failed to load profile. Please try again.')
+    router.push('/escort/profiles')
+  } finally {
+    isLoading.value = false
+  }
+}
 
 onMounted(async () => {
   if (!authStore.isAuthenticated) {
@@ -139,13 +275,23 @@ onMounted(async () => {
     return
   }
 
-  // Load subscription data
-  await subscriptionStore.loadUserSubscription()
-  
-  // Check if user can create a profile
-  if (!subscriptionStore.canCreateProfile) {
-    profileStore.setError('You have reached your monthly profile creation limit. Please upgrade your subscription to create more profiles.')
-    return
+  try {
+    // Load subscription data - this will create a free subscription if none exists
+    await subscriptionStore.loadUserSubscription()
+    
+    // In edit mode, just load the profile
+    if (isEditMode.value) {
+      await loadProfile()
+    } else {
+      // Check if user can create a profile
+      if (!subscriptionStore.canCreateProfile) {
+        authStore.setError('You have reached your monthly profile creation limit. Please upgrade your subscription to create more profiles.')
+        return
+      }
+    }
+  } catch (error) {
+    console.error('Error loading subscription data:', error)
+    authStore.setError('Failed to load subscription information. Please refresh the page.')
   }
 })
 
@@ -277,17 +423,14 @@ const handleFileUpload = (event: Event) => {
   }
 }
 
-const toggleBlur = (index: number) => {
-  uploadedFiles.value[index].blur = !uploadedFiles.value[index].blur
-}
 
 const removeFile = async (index: number) => {
   const file = uploadedFiles.value[index]
   
   // If it's an existing media file, delete it from the server
-  if (file.existing && file.id) {
+  if (file.existing && file.id && (draftProfileId.value || profileId.value)) {
     try {
-      await profileStore.removeMedia(file.id, 'temp-profile-id')
+      await profileStore.removeMedia(file.id, draftProfileId.value || profileId.value!)
     } catch (error) {
       console.error('Error removing media:', error)
       authStore.setError('Failed to remove media. Please try again.')
@@ -297,6 +440,12 @@ const removeFile = async (index: number) => {
   
   // Remove from the local array
   uploadedFiles.value.splice(index, 1)
+}
+
+const toggleBlur = (index: number) => {
+  if (uploadedFiles.value[index]) {
+    uploadedFiles.value[index].blur = !uploadedFiles.value[index].blur
+  }
 }
 
 
@@ -319,13 +468,17 @@ const saveAsDraft = async () => {
   try {
     isSaving.value = true
     
+    // Debug: Check if there's presence service interference
+    console.log('Starting profile save...')
+    console.log('Current authStore.user:', authStore.user)
+    
     // Prepare profile data with whatever is filled
     const profileData = {
       name: form.name || 'Untitled Profile',
       age: form.age ? parseInt(form.age) : 18,
-      locationCity: form.location.city || '',
-      locationState: form.location.state || '',
-      locationCountry: form.location.country || '',
+      locationCity: form.location.city || form.locationCity || '',
+      locationState: form.location.state || form.locationState || '',
+      locationCountry: form.location.country || form.locationCountry || '',
       description: form.description || '',
       bio: form.bio || '',
       workingHours: JSON.stringify(form.workingHours),
@@ -337,13 +490,27 @@ const saveAsDraft = async () => {
       preferencesMinimumNotice: parseInt(form.preferences.minimumNotice || '2')
     }
     
-    if (draftProfileId.value) {
-      // Update existing draft
-      await profileStore.updateProfile(draftProfileId.value, profileData)
+    console.log('Saving profile with location:', {
+      city: profileData.locationCity,
+      state: profileData.locationState,
+      country: profileData.locationCountry
+    })
+    
+    if (draftProfileId.value || isEditMode.value) {
+      // Update existing profile
+      const updateId = draftProfileId.value || profileId.value!
+      await profileStore.updateProfile(updateId, profileData)
+      draftProfileId.value = updateId
     } else {
       // Create new draft profile
+      console.log('Creating profile with data:', profileData)
+      console.log('User ID:', authStore.user!.$id)
+      console.log('Full user object:', authStore.user)
+      
       const profile = await profileStore.createProfile(authStore.user!.$id, profileData)
       draftProfileId.value = profile.$id || profile.id
+      console.log('Created profile:', profile)
+      console.log('Draft profile ID set to:', draftProfileId.value)
       
       // Increment subscription usage for new profile
       await subscriptionStore.incrementProfileUsage()
@@ -353,7 +520,10 @@ const saveAsDraft = async () => {
     if (selectedServices.value.length > 0 && draftProfileId.value) {
       // First delete existing services for this profile
       try {
-        const profile = profileStore.profiles.find(p => (p.$id || p.id) === draftProfileId.value)
+        const profile = profileStore.profiles.find(p => {
+          const pId = (p as any).$id || (p as any).id
+          return pId === draftProfileId.value
+        })
         if (profile?.services && profile.services.length > 0) {
           for (const service of profile.services) {
             await profileStore.removeService(service.id, draftProfileId.value)
@@ -379,7 +549,10 @@ const saveAsDraft = async () => {
     if (draftProfileId.value) {
       // First delete existing pricing for this profile
       try {
-        const profile = profileStore.profiles.find(p => (p.$id || p.id) === draftProfileId.value)
+        const profile = profileStore.profiles.find(p => {
+          const pId = (p as any).$id || (p as any).id
+          return pId === draftProfileId.value
+        })
         if (profile?.pricing && profile.pricing.length > 0) {
           for (const pricing of profile.pricing) {
             await profileStore.updatePricing(pricing.id, { amount: 0 }) // Mark as deleted
@@ -414,9 +587,23 @@ const saveAsDraft = async () => {
     // Show success message - we'll clear the error and could show a toast/notification
     authStore.clearError()
     console.log('Profile saved as draft successfully')
-  } catch (error) {
+    
+    // Show success message
+    alert('Profile saved as draft successfully!')
+  } catch (error: any) {
     console.error('Error saving draft:', error)
-    authStore.setError('Failed to save draft. Please try again.')
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      type: error.type,
+      response: error.response,
+      stack: error.stack
+    })
+    
+    // Show more specific error message
+    const errorMessage = error.message || 'Failed to save draft. Please try again.'
+    authStore.setError(errorMessage)
+    alert(`Error: ${errorMessage}`)
   } finally {
     isSaving.value = false
   }
@@ -432,77 +619,122 @@ const publishProfile = async () => {
       return
     }
     
-    // Prepare profile data with 'active' status
-    const profileData = {
-      name: form.name,
-      age: parseInt(form.age),
-      locationCity: form.location.city,
-      locationState: form.location.state || '',
-      locationCountry: form.location.country,
-      description: form.description,
-      bio: form.bio || '',
-      workingHours: JSON.stringify(form.workingHours),
-      availabilityAdvanceBookingDays: 30,
-      preferencesAutoApproveBookings: form.preferences.autoApproveBookings,
-      preferencesRequireDeposit: form.preferences.requireDeposit,
-      preferencesDepositPercentage: form.preferences.requireDeposit ? parseInt(form.preferences.depositPercentage || '0') : null,
-      preferencesCancellationPolicy: form.preferences.cancellationPolicy,
-      preferencesMinimumNotice: parseInt(form.preferences.minimumNotice || '2'),
-      status: 'active' as 'active' // Set as active when publishing
-    }
-    
-    let profileId: string
-    
-    if (draftProfileId.value) {
-      // Update existing draft to active
-      await profileStore.updateProfile(draftProfileId.value, profileData)
-      profileId = draftProfileId.value
-    } else {
-      // Create new active profile
-      const profile = await profileStore.createProfile(authStore.user!.$id, profileData)
-      profileId = profile.$id || profile.id
-      
-      // Increment subscription usage for new profile (if not already incremented during draft)
-      await subscriptionStore.incrementProfileUsage()
-    }
-    
-    // Create services in separate collection
-    for (const serviceValue of selectedServices.value) {
-      await profileStore.createService(profileId, {
-        name: getServiceLabel(serviceValue),
-        description: serviceDescriptions.value[serviceValue] || '',
-        category: serviceValue 
-      })
-    }
-    
-    // Create pricing options in separate collection
-    for (const pricing of form.pricing.filter(p => p.amount)) {
-      await profileStore.createPricing(profileId, {
-        type: pricing.type as 'hourly' | 'daily' | 'event' | 'custom',
-        amount: parseInt(pricing.amount),
-        currency: 'USD',
-        description: pricing.description || ''
-      })
-    }
-    
-    // Upload media files
-    for (const uploadedFile of uploadedFiles.value) {
-      if (!uploadedFile.existing && uploadedFile.file) {
-        await profileStore.uploadMedia(profileId, uploadedFile.file, {
-          blur: uploadedFile.blur
-        })
+    // First save as draft if not already done
+    if (!draftProfileId.value) {
+      await saveAsDraft()
+      if (!draftProfileId.value) {
+        authStore.setError('Failed to save profile. Please try again.')
+        return
       }
     }
     
-    // Redirect to profiles page
-    router.push('/escort/profiles')
+    // Get the complete profile data for validation
+    await profileStore.fetchProfile(draftProfileId.value)
+    const profile = profileStore.profiles.find(p => {
+      const pId = (p as any).$id || (p as any).id
+      return pId === draftProfileId.value
+    })
+    
+    if (!profile) {
+      authStore.setError('Profile not found. Please try again.')
+      return
+    }
+    
+    // Validate the profile for activation
+    const validation = validateProfileCompletion(profile)
+    
+    if (!validation.canActivate) {
+      // Show activation modal with validation errors
+      showActivationModal.value = true
+      return
+    }
+    
+    // Profile is valid, activate it
+    await handleProfileActivation()
+    
   } catch (error) {
-    console.error('Error creating profile:', error)
-    authStore.setError('Failed to create profile. Please try again.')
+    console.error('Error publishing profile:', error)
+    authStore.setError('Failed to publish profile. Please try again.')
   } finally {
     isLoading.value = false
   }
 }
+
+const handleProfileActivation = async () => {
+  try {
+    if (!draftProfileId.value) return
+    
+    // Use the service's activateProfile method which includes validation
+    await profileService.activateProfile(draftProfileId.value)
+    
+    // Refresh the profile in the store
+    await profileStore.fetchProfile(draftProfileId.value)
+    
+    // Redirect to profiles page
+    router.push('/escort/profiles')
+  } catch (error) {
+    console.error('Error activating profile:', error)
+    authStore.setError('Failed to activate profile. Please ensure all required fields are completed.')
+  }
+}
+
+const closeActivationModal = () => {
+  showActivationModal.value = false
+  isLoading.value = false
+}
+
+const currentProfileForModal = computed(() => {
+  if (!draftProfileId.value) return {}
+  
+  const profile = profileStore.profiles.find(p => p.id === draftProfileId.value)
+  return profile || {}
+})
+
+// Force location dropdowns to re-render when profile is loaded
+const locationKey = computed(() => {
+  return `${initialDataLoaded.value}-${form.location.city}-${form.location.country}`
+})
+
+// Watch for location changes and sync with flat structure
+watch(() => form.location, (newLocation) => {
+  console.log('CreateProfile: form.location changed:', newLocation)
+  form.locationCity = newLocation.city || ''
+  form.locationState = newLocation.state || ''
+  form.locationCountry = newLocation.country || ''
+}, { deep: true })
+
+// Also watch flat fields and sync back to nested structure
+watch([() => form.locationCity, () => form.locationState, () => form.locationCountry], 
+  ([city, state, country]) => {
+    console.log('CreateProfile: Flat fields changed:', { city, state, country })
+    form.location = {
+      city: city || '',
+      state: state || '',
+      country: country || ''
+    }
+  })
+
+// Watch for profile data being loaded and update location
+watch(() => profile.value, (newProfile) => {
+  if (newProfile && isEditMode.value && !initialDataLoaded.value) {
+    // Re-populate location data when profile becomes available
+    const locationData = {
+      city: newProfile.locationCity || newProfile.location?.city || '',
+      state: newProfile.locationState || newProfile.location?.state || '',
+      country: newProfile.locationCountry || newProfile.location?.country || ''
+    }
+    
+    console.log('Profile loaded, updating location:', {
+      profile: newProfile,
+      locationData
+    })
+    
+    form.location = locationData
+    form.locationCity = locationData.city
+    form.locationState = locationData.state
+    form.locationCountry = locationData.country
+  }
+}, { immediate: true })
 
 const goBack = () => {
   router.push('/escort/profiles')
@@ -559,11 +791,11 @@ const getFileType = (mimeType: string): string => {
       </button>
       
       <div class="header-content">
-        <h1>Create Your Professional Profile</h1>
-        <p>Build your presence and connect with quality clients</p>
+        <h1>{{ isEditMode ? 'Edit' : 'Create' }} Your Professional Profile</h1>
+        <p>{{ isEditMode ? 'Update your profile information' : 'Build your presence and connect with quality clients' }}</p>
         
         <!-- Subscription Status -->
-        <div v-if="subscriptionPlan" class="subscription-status">
+        <div v-if="subscriptionPlan && !isEditMode" class="subscription-status">
           <div class="status-badge" :class="subscriptionPlan.tier">
             <span class="plan-name">{{ subscriptionPlan.name }} Plan</span>
             <span class="separator">•</span>
@@ -576,29 +808,6 @@ const getFileType = (mimeType: string): string => {
           </router-link>
         </div>
         
-        <div class="header-stats">
-          <div class="stat">
-            <div class="stat-icon">📝</div>
-            <div class="stat-text">
-              <strong>{{ currentStep }} of {{ totalSteps }}</strong>
-              <span>Steps Completed</span>
-            </div>
-          </div>
-          <div class="stat">
-            <div class="stat-icon">⏱️</div>
-            <div class="stat-text">
-              <strong>~10 min</strong>
-              <span>To Complete</span>
-            </div>
-          </div>
-          <div class="stat" v-if="draftProfileId">
-            <div class="stat-icon">💾</div>
-            <div class="stat-text">
-              <strong>Draft Saved</strong>
-              <span>Auto-saving enabled</span>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
     
@@ -606,7 +815,7 @@ const getFileType = (mimeType: string): string => {
     <div class="step-indicator-simple">
       <div class="steps-progress">
         <div 
-          v-for="(step, index) in steps" 
+          v-for="step in steps" 
           :key="step.number"
           class="step-item"
           :class="{ 
@@ -645,7 +854,6 @@ const getFileType = (mimeType: string): string => {
             <label for="name">
               Profile Name
               <span class="required">*</span>
-              <span class="field-hint">Your professional name clients will see</span>
             </label>
             <div class="input-wrapper">
               <input 
@@ -662,13 +870,13 @@ const getFileType = (mimeType: string): string => {
                 </svg>
               </div>
             </div>
+            <div class="field-hint">Your professional name clients will see</div>
           </div>
         
           <div class="form-group">
             <label for="age">
               Age
               <span class="required">*</span>
-              <span class="field-hint">Must be 18 or older</span>
             </label>
             <div class="input-wrapper">
               <input 
@@ -687,19 +895,26 @@ const getFileType = (mimeType: string): string => {
                 </svg>
               </div>
             </div>
+            <div class="field-hint">Must be 18 or older</div>
           </div>
         </div>
         
         <LocationDropdowns 
+          v-if="!isEditMode || initialDataLoaded"
           v-model="form.location"
           :required="true"
+          :key="`location-${locationDropdownsKey}-${profile?.id || 'new'}-${form.location.city}-${form.location.state}-${form.location.country}`"
         />
+        
+        <!-- Loading placeholder for location dropdowns -->
+        <div v-else class="location-loading">
+          <div class="loading-spinner">Loading location data...</div>
+        </div>
         
         <div class="form-group full-width">
           <label for="description">
             Short Description
             <span class="required">*</span>
-            <span class="field-hint">A captivating intro that appears in search results</span>
           </label>
           <div class="textarea-wrapper">
             <textarea 
@@ -713,12 +928,12 @@ const getFileType = (mimeType: string): string => {
             ></textarea>
             <div class="char-count">{{ form.description.length }}/500</div>
           </div>
+          <div class="field-hint">A captivating intro that appears in search results</div>
         </div>
         
         <div class="form-group full-width">
           <label for="bio">
             Detailed Bio
-            <span class="field-hint">Share your personality, interests, and what makes you unique</span>
           </label>
           <div class="textarea-wrapper">
             <textarea 
@@ -731,6 +946,7 @@ const getFileType = (mimeType: string): string => {
             ></textarea>
             <div class="char-count">{{ (form.bio || '').length }}/2000</div>
           </div>
+          <div class="field-hint">Share your personality, interests, and what makes you unique</div>
         </div>
         
         <div class="tips-box">
@@ -959,8 +1175,8 @@ const getFileType = (mimeType: string): string => {
               </div>
             </div>
             <div class="media-controls">
-              <label v-if="file.file && file.file.type.startsWith('image/')" class="blur-toggle">
-                <input type="checkbox" v-model="file.blur" />
+              <label v-if="(file.file && file.file.type.startsWith('image/')) || (file.existing && !file.file)" class="blur-toggle">
+                <input type="checkbox" v-model="file.blur" @change="toggleBlur(index)" />
                 <span>Blur face</span>
               </label>
               <button type="button" @click="removeFile(index)" class="remove-btn">
@@ -1009,6 +1225,7 @@ const getFileType = (mimeType: string): string => {
             class="btn btn-outline"
           >
             <span v-if="isSaving">Saving...</span>
+            <span v-else-if="isEditMode">Save Changes</span>
             <span v-else>{{ draftProfileId ? 'Update Draft' : 'Save as Draft' }}</span>
           </button>
           
@@ -1029,24 +1246,51 @@ const getFileType = (mimeType: string): string => {
             class="btn btn-primary"
             :title="!canPublish ? 'Complete all required steps to publish' : ''"
           >
-            <span v-if="isLoading">Publishing...</span>
-            <span v-else>Publish Profile</span>
+            <span v-if="isLoading">{{ profile?.status === 'active' ? 'Updating...' : 'Publishing...' }}</span>
+            <span v-else-if="profile?.status === 'active'">Update Profile</span>
+            <span v-else>{{ isEditMode ? 'Activate Profile' : 'Publish Profile' }}</span>
           </button>
         </div>
       </div>
     </form>
+    
+    <!-- Profile Activation Modal -->
+    <ProfileActivationModal 
+      :show="showActivationModal"
+      :profile="currentProfileForModal"
+      :profile-id="draftProfileId || ''"
+      @close="closeActivationModal"
+      @activated="handleProfileActivation"
+    />
   </div>
 </template>
 
 <style scoped lang="scss">
 .create-profile {
   padding: var(--spacing-xl);
-  max-width: 800px;
+  max-width: 900px;
   margin: 0 auto;
+  
+  @media (max-width: 768px) {
+    padding: var(--spacing-lg) var(--spacing-md);
+    max-width: none;
+  }
+  
+  @media (max-width: 480px) {
+    padding: var(--spacing-md);
+  }
 }
 
 .form-header {
   margin-bottom: var(--spacing-xxl);
+  
+  @media (max-width: 768px) {
+    margin-bottom: var(--spacing-xl);
+  }
+  
+  @media (max-width: 480px) {
+    margin-bottom: var(--spacing-lg);
+  }
   
   .back-btn {
     display: inline-flex;
@@ -1071,6 +1315,12 @@ const getFileType = (mimeType: string): string => {
     svg {
       transition: transform 0.2s ease;
     }
+    
+    @media (max-width: 480px) {
+      font-size: 0.9rem;
+      padding: var(--spacing-xs) var(--spacing-sm);
+      margin-bottom: var(--spacing-md);
+    }
   }
   
   .header-content {
@@ -1081,48 +1331,33 @@ const getFileType = (mimeType: string): string => {
       margin-bottom: var(--spacing-sm);
       font-size: 2.5rem;
       font-weight: 700;
+      
+      @media (max-width: 768px) {
+        font-size: 2rem;
+      }
+      
+      @media (max-width: 480px) {
+        font-size: 1.75rem;
+        line-height: 1.2;
+      }
     }
     
     p {
       color: var(--color-text-light);
       font-size: 1.2rem;
       margin-bottom: var(--spacing-xl);
+      
+      @media (max-width: 768px) {
+        font-size: 1.1rem;
+      }
+      
+      @media (max-width: 480px) {
+        font-size: 1rem;
+        margin-bottom: var(--spacing-lg);
+      }
     }
   }
   
-  .header-stats {
-    display: flex;
-    justify-content: center;
-    gap: var(--spacing-xl);
-    padding: var(--spacing-lg);
-    background: var(--color-background-alt);
-    border-radius: var(--border-radius-lg);
-    
-    .stat {
-      display: flex;
-      align-items: center;
-      gap: var(--spacing-md);
-      
-      .stat-icon {
-        font-size: 2rem;
-      }
-      
-      .stat-text {
-        text-align: left;
-        
-        strong {
-          display: block;
-          color: var(--color-text-dark);
-          font-size: 1.1rem;
-        }
-        
-        span {
-          color: var(--color-text-light);
-          font-size: 0.9rem;
-        }
-      }
-    }
-  }
 }
 
 .profile-form {
@@ -1293,6 +1528,14 @@ const getFileType = (mimeType: string): string => {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
+  min-height: 48px;
+  
+  @media (max-width: 480px) {
+    padding: 10px 20px;
+    font-size: 0.95rem;
+    min-height: 44px;
+    width: 100%;
+  }
   
   &.btn-primary {
     background-color: var(--color-accent);
@@ -1316,6 +1559,17 @@ const getFileType = (mimeType: string): string => {
     &:hover {
       background-color: var(--color-background-alt);
       border-color: var(--color-accent);
+    }
+  }
+  
+  &.btn-ghost {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--color-text-light);
+    
+    &:hover {
+      color: var(--color-text-dark);
+      background: var(--color-background-alt);
     }
   }
 }
@@ -1600,6 +1854,16 @@ const getFileType = (mimeType: string): string => {
   border-radius: var(--border-radius-lg);
   padding: var(--spacing-lg);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  
+  @media (max-width: 768px) {
+    margin-bottom: var(--spacing-lg);
+    padding: var(--spacing-md);
+  }
+  
+  @media (max-width: 480px) {
+    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-sm);
+  }
 }
 
 .steps-progress {
@@ -1609,7 +1873,12 @@ const getFileType = (mimeType: string): string => {
   position: relative;
   
   @media (max-width: 768px) {
-    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--spacing-lg);
+  }
+  
+  @media (max-width: 480px) {
+    justify-content: space-evenly;
     gap: var(--spacing-sm);
   }
 }
@@ -1624,8 +1893,24 @@ const getFileType = (mimeType: string): string => {
   flex: 1;
   cursor: default;
   
+  @media (max-width: 480px) {
+    flex-direction: column;
+    justify-content: center;
+    text-align: center;
+    padding: 0;
+    border-radius: 0;
+    transition: none;
+    gap: var(--spacing-xs);
+  }
+  
   &.clickable {
     cursor: pointer;
+    
+    @media (max-width: 480px) {
+      &:hover {
+        background-color: transparent;
+      }
+    }
   }
   
   &.active {
@@ -1648,14 +1933,11 @@ const getFileType = (mimeType: string): string => {
       color: white;
     }
     
-    .step-label {
-      color: var(--color-text-dark);
-    }
   }
   
-  &:not(.clickable) {
-    opacity: 0.5;
-  }
+  // &:not(.clickable) {
+  //   // opacity: 0.5;
+  // }
 }
 
 .step-number {
@@ -1686,6 +1968,10 @@ const getFileType = (mimeType: string): string => {
   @media (max-width: 768px) {
     font-size: 0.75rem;
   }
+  
+  @media (max-width: 480px) {
+    display: none;
+  }
 }
 
 .progress-line {
@@ -1696,6 +1982,10 @@ const getFileType = (mimeType: string): string => {
   height: 2px;
   background: var(--color-text-lighter);
   z-index: 1;
+  
+  @media (max-width: 480px) {
+    display: none;
+  }
 }
 
 .progress-line-fill {
@@ -1706,6 +1996,10 @@ const getFileType = (mimeType: string): string => {
   background: var(--color-accent);
   transition: width 0.5s ease;
   z-index: 1;
+  
+  @media (max-width: 480px) {
+    display: none;
+  }
 }
 
 /* Step Navigation Styles */
@@ -1725,10 +2019,22 @@ const getFileType = (mimeType: string): string => {
   @media (max-width: 768px) {
     flex-direction: column;
     gap: var(--spacing-md);
+    padding: var(--spacing-md);
     
     .nav-right {
       width: 100%;
       justify-content: center;
+      flex-wrap: wrap;
+    }
+  }
+  
+  @media (max-width: 480px) {
+    padding: var(--spacing-sm);
+    gap: var(--spacing-sm);
+    
+    .nav-right {
+      flex-direction: column;
+      gap: var(--spacing-xs);
     }
   }
 }
@@ -1763,14 +2069,34 @@ const getFileType = (mimeType: string): string => {
   }
 }
 
+/* Field Hints */
+.field-hint {
+  display: block;
+  color: var(--color-text-light);
+  font-size: 0.85rem;
+  margin-top: var(--spacing-xs);
+  line-height: 1.4;
+}
+
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: var(--spacing-lg);
-  margin-bottom: var(--spacing-lg);
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: var(--spacing-xl);
+  margin-bottom: var(--spacing-xl);
+  
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+    gap: var(--spacing-lg);
+  }
+  
+  @media (max-width: 480px) {
+    gap: var(--spacing-md);
+  }
 }
 
 .form-group {
+  margin-bottom: var(--spacing-lg);
+  
   label {
     display: flex;
     align-items: baseline;
@@ -1778,23 +2104,24 @@ const getFileType = (mimeType: string): string => {
     color: var(--color-text-dark);
     font-weight: 600;
     margin-bottom: var(--spacing-sm);
-    font-size: 0.95rem;
+    font-size: 1rem;
     
     .required {
       color: var(--color-danger);
       font-size: 1.1rem;
     }
-    
-    .field-hint {
-      color: var(--color-text-light);
-      font-weight: 400;
-      font-size: 0.85rem;
-      margin-left: auto;
-    }
   }
   
   &.full-width {
     grid-column: 1 / -1;
+  }
+  
+  @media (max-width: 480px) {
+    margin-bottom: var(--spacing-md);
+    
+    label {
+      font-size: 0.95rem;
+    }
   }
 }
 
@@ -1810,6 +2137,7 @@ const getFileType = (mimeType: string): string => {
     font-size: 1rem;
     transition: all 0.2s ease;
     background: white;
+    min-height: 48px;
     
     &:focus {
       outline: none;
@@ -1820,6 +2148,13 @@ const getFileType = (mimeType: string): string => {
     &::placeholder {
       color: var(--color-text-lighter);
     }
+    
+    @media (max-width: 480px) {
+      padding: var(--spacing-sm) var(--spacing-md);
+      padding-right: 42px;
+      font-size: 0.95rem;
+      min-height: 44px;
+    }
   }
   
   .input-icon {
@@ -1829,6 +2164,15 @@ const getFileType = (mimeType: string): string => {
     transform: translateY(-50%);
     color: var(--color-text-light);
     pointer-events: none;
+    
+    @media (max-width: 480px) {
+      right: var(--spacing-sm);
+      
+      svg {
+        width: 18px;
+        height: 18px;
+      }
+    }
   }
 }
 
@@ -1844,11 +2188,22 @@ const getFileType = (mimeType: string): string => {
     font-family: inherit;
     resize: vertical;
     transition: all 0.2s ease;
+    min-height: 100px;
     
     &:focus {
       outline: none;
       border-color: var(--color-accent);
       box-shadow: 0 0 0 3px var(--color-accent-light);
+    }
+    
+    &::placeholder {
+      color: var(--color-text-lighter);
+    }
+    
+    @media (max-width: 480px) {
+      padding: var(--spacing-sm);
+      font-size: 0.95rem;
+      min-height: 80px;
     }
   }
   
@@ -1856,11 +2211,17 @@ const getFileType = (mimeType: string): string => {
     position: absolute;
     bottom: var(--spacing-sm);
     right: var(--spacing-sm);
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     color: var(--color-text-light);
     background: white;
     padding: 2px 6px;
     border-radius: var(--border-radius-sm);
+    
+    @media (max-width: 480px) {
+      font-size: 0.75rem;
+      bottom: 6px;
+      right: 6px;
+    }
   }
 }
 
@@ -1906,6 +2267,11 @@ const getFileType = (mimeType: string): string => {
   font-size: 1.2rem;
   margin-bottom: var(--spacing-lg);
   font-weight: 600;
+  
+  @media (max-width: 480px) {
+    font-size: 1.1rem;
+    margin-bottom: var(--spacing-md);
+  }
 }
 
 .services-grid {
@@ -1913,6 +2279,17 @@ const getFileType = (mimeType: string): string => {
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: var(--spacing-md);
   margin-bottom: var(--spacing-xl);
+  
+  @media (max-width: 768px) {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: var(--spacing-sm);
+  }
+  
+  @media (max-width: 480px) {
+    grid-template-columns: 1fr;
+    gap: var(--spacing-xs);
+    margin-bottom: var(--spacing-lg);
+  }
 }
 
 .service-card {
@@ -1925,9 +2302,26 @@ const getFileType = (mimeType: string): string => {
   cursor: pointer;
   transition: all 0.2s ease;
   
+  @media (max-width: 768px) {
+    padding: var(--spacing-md);
+  }
+  
+  @media (max-width: 480px) {
+    padding: var(--spacing-sm);
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+  }
+  
   &:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    
+    @media (max-width: 480px) {
+      transform: none;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    }
   }
   
   &.selected {
@@ -2068,6 +2462,20 @@ const getFileType = (mimeType: string): string => {
     &:hover {
       text-decoration: underline;
     }
+  }
+}
+
+/* Location Loading */
+.location-loading {
+  padding: var(--spacing-lg);
+  text-align: center;
+  background: var(--color-background-alt);
+  border-radius: var(--border-radius-md);
+  border: 2px solid var(--color-text-lighter);
+  
+  .loading-spinner {
+    color: var(--color-text-light);
+    font-style: italic;
   }
 }
 </style> 

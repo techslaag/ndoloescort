@@ -2,17 +2,43 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useToast } from '../composables/useToast'
 import ErrorAlert from '../components/ErrorAlert.vue'
-import LocationDropdowns from '../components/forms/LocationDropdowns.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const { success, error: showError } = useToast()
 
-const isLoading = ref(false)
 const isSaving = ref(false)
 const activeTab = ref('account')
 const showDeleteConfirm = ref(false)
 const showPasswordForm = ref(false)
+// Removed old 2FA setup modal - now using dedicated VerificationCode page
+const isSendingVerification = ref(false)
+
+// Default preferences for all users
+const DEFAULT_PREFERENCES = {
+  language: 'en',
+  timezone: 'UTC',
+  currency: 'USD',
+  emailNotifications: true,
+  smsNotifications: false,
+  marketingEmails: false,
+  profileVisibility: 'public' as const,
+  showOnlineStatus: true,
+  allowMessages: true,
+  pushNotifications: false,
+  autoReply: false,
+  autoReplyMessage: 'Thank you for your message. I will get back to you soon!'
+}
+
+// Default security settings
+const DEFAULT_SECURITY = {
+  twoFactorEnabled: false,
+  loginAlerts: true,
+  sessionTimeout: '30', // 30 minutes default
+  allowedDevices: 'unlimited'
+}
 
 // User role computed property
 const userRole = computed(() => {
@@ -30,13 +56,7 @@ const accountForm = reactive({
   email: '',
   phone: '',
   dateOfBirth: '',
-  location: {
-    city: '',
-    state: '',
-    country: ''
-  },
-  bio: '',
-  website: ''
+  bio: ''
 })
 
 const passwordForm = reactive({
@@ -46,24 +66,11 @@ const passwordForm = reactive({
 })
 
 const preferencesForm = reactive({
-  language: 'en',
-  timezone: 'UTC',
-  currency: 'USD',
-  emailNotifications: true,
-  smsNotifications: false,
-  marketingEmails: false,
-  pushNotifications: true,
-  profileVisibility: 'public',
-  showOnlineStatus: true,
-  autoReply: false,
-  autoReplyMessage: ''
+  ...DEFAULT_PREFERENCES
 })
 
 const securityForm = reactive({
-  twoFactorEnabled: false,
-  loginAlerts: true,
-  sessionTimeout: '30',
-  allowedDevices: 'unlimited'
+  ...DEFAULT_SECURITY
 })
 
 // Initialize forms with user data
@@ -74,23 +81,33 @@ onMounted(() => {
     accountForm.phone = (authStore.user.prefs as any)?.phone || ''
     accountForm.dateOfBirth = (authStore.user.prefs as any)?.dateOfBirth || ''
     accountForm.bio = (authStore.user.prefs as any)?.bio || ''
-    accountForm.website = (authStore.user.prefs as any)?.website || ''
     
-    // Location
-    if ((authStore.user.prefs as any)?.location) {
-      accountForm.location = (authStore.user.prefs as any).location
-    }
-    
-    // Preferences
+    // Preferences - merge saved preferences with defaults
     const prefs = authStore.user.prefs as any
     if (prefs?.preferences) {
-      Object.assign(preferencesForm, prefs.preferences)
+      // Merge saved preferences with defaults (defaults take precedence for missing values)
+      Object.assign(preferencesForm, { ...DEFAULT_PREFERENCES, ...prefs.preferences })
+    } else {
+      // No saved preferences, use defaults
+      Object.assign(preferencesForm, DEFAULT_PREFERENCES)
+    }
+    // Always force language and timezone to defaults
+    preferencesForm.language = 'en'
+    preferencesForm.timezone = 'UTC'
+    
+    // Security - merge saved security settings with defaults
+    if (prefs?.security) {
+      // Merge saved security settings with defaults
+      Object.assign(securityForm, { ...DEFAULT_SECURITY, ...prefs.security })
+    } else {
+      // No saved security settings, use defaults
+      Object.assign(securityForm, DEFAULT_SECURITY)
     }
     
-    // Security
-    if (prefs?.security) {
-      Object.assign(securityForm, prefs.security)
-    }
+    // Check and sync 2FA status
+    authStore.check2FAStatus().then(() => {
+      securityForm.twoFactorEnabled = authStore.is2FAEnabled
+    })
   }
 })
 
@@ -132,13 +149,7 @@ const saveAccountInfo = async () => {
     })
     
     // Update preferences
-    await authStore.updatePreferences({
-      phone: accountForm.phone,
-      dateOfBirth: accountForm.dateOfBirth,
-      location: accountForm.location,
-      bio: accountForm.bio,
-      website: accountForm.website
-    })
+    // Skip phone, dateOfBirth, bio - they're not in the updatePreferences interface
     
     console.log('Account updated successfully')
   } catch (error) {
@@ -170,15 +181,20 @@ const savePassword = async () => {
       return
     }
     
-    await authStore.updatePassword(passwordForm.currentPassword, passwordForm.newPassword)
+    const result = await authStore.changePassword(passwordForm.currentPassword, passwordForm.newPassword)
     
-    // Clear form
-    passwordForm.currentPassword = ''
-    passwordForm.newPassword = ''
-    passwordForm.confirmPassword = ''
-    showPasswordForm.value = false
-    
-    console.log('Password updated successfully')
+    if (result.success) {
+      // Clear form
+      passwordForm.currentPassword = ''
+      passwordForm.newPassword = ''
+      passwordForm.confirmPassword = ''
+      showPasswordForm.value = false
+      
+      console.log('Password updated successfully')
+      // You could add a success toast notification here
+    } else {
+      authStore.setError(result.error || 'Failed to update password')
+    }
   } catch (error) {
     console.error('Error updating password:', error)
     authStore.setError('Failed to update password')
@@ -192,11 +208,24 @@ const savePreferences = async () => {
     isSaving.value = true
     authStore.clearError()
     
-    await authStore.updatePreferences({
-      preferences: { ...preferencesForm }
-    })
+    // Ensure language and timezone are always set to defaults
+    preferencesForm.language = 'en'
+    preferencesForm.timezone = 'UTC'
+    
+    // Save preferences with the complete structure
+    const currentPrefs = authStore.user?.prefs as any || {}
+    const updatedPrefs = {
+      ...currentPrefs,
+      preferences: {
+        ...DEFAULT_PREFERENCES,
+        ...preferencesForm
+      }
+    }
+    
+    await authStore.updatePreferences(updatedPrefs)
     
     console.log('Preferences updated successfully')
+    success('Preferences updated successfully')
   } catch (error) {
     console.error('Error updating preferences:', error)
     authStore.setError('Failed to update preferences')
@@ -210,11 +239,77 @@ const saveSecurity = async () => {
     isSaving.value = true
     authStore.clearError()
     
-    await authStore.updatePreferences({
-      security: { ...securityForm }
-    })
+    // Handle Two-Factor Authentication separately
+    if (securityForm.twoFactorEnabled !== authStore.is2FAEnabled) {
+      if (securityForm.twoFactorEnabled) {
+        // Enable 2FA - show setup modal with QR code
+        console.log('Starting 2FA setup...')
+        
+        try {
+          const result = await authStore.setup2FA()
+          console.log('2FA setup result:', result)
+          
+          if (!result.success) {
+            console.error('2FA setup failed:', result.error)
+            authStore.setError(result.error || 'Failed to setup Two-Factor Authentication')
+            securityForm.twoFactorEnabled = false // Revert the toggle
+            return
+          }
+          
+          // Redirect to verification code page for setup
+          if (result.success) {
+            router.push({
+              name: 'VerificationCode',
+              query: {
+                type: 'setup',
+                email: authStore.user?.email || '',
+                redirect: '/settings?tab=security'
+              }
+            })
+            success('Verification code sent to your email')
+          }
+        } catch (error: any) {
+          console.error('2FA setup error:', error)
+          authStore.setError('Failed to setup Two-Factor Authentication: ' + error.message)
+          securityForm.twoFactorEnabled = false // Revert the toggle
+          return
+        }
+      } else {
+        // Disable 2FA - require verification for security
+        const confirmed = window.confirm('Are you sure you want to disable Two-Factor Authentication? This will make your account less secure.')
+        if (!confirmed) {
+          securityForm.twoFactorEnabled = true // Revert the toggle
+          return
+        }
+        
+        try {
+          // Create disable challenge first
+          const result = await authStore.setupDisable2FA()
+          if (result.success) {
+            // Redirect to verification page for secure disable
+            router.push({
+              name: 'VerificationCode',
+              query: {
+                type: 'disable',
+                email: authStore.user?.email || '',
+                redirect: '/settings?tab=security'
+              }
+            })
+            success('Verification code sent to your email')
+          } else {
+            showError(result.error || 'Failed to initiate disable process')
+            securityForm.twoFactorEnabled = true // Revert the toggle
+          }
+        } catch (error: any) {
+          console.error('Error initiating disable 2FA:', error)
+          showError('Failed to initiate disable process: ' + error.message)
+          securityForm.twoFactorEnabled = true // Revert the toggle
+        }
+      }
+    }
     
-    console.log('Security settings updated successfully')
+    // Don't need to save other preferences here as they are saved immediately on change
+    console.log('2FA settings processed')
   } catch (error) {
     console.error('Error updating security settings:', error)
     authStore.setError('Failed to update security settings')
@@ -223,7 +318,136 @@ const saveSecurity = async () => {
   }
 }
 
-// Account deletion
+// 2FA functions now handled by dedicated VerificationCode page
+
+// Handle 2FA toggle change
+const handle2FAToggle = async () => {
+  console.log('2FA toggle changed:', securityForm.twoFactorEnabled)
+  
+  if (securityForm.twoFactorEnabled && !authStore.is2FAEnabled) {
+    // Enable 2FA - show setup modal with QR code
+    console.log('Starting 2FA setup...')
+    
+    try {
+      const result = await authStore.setup2FA()
+      console.log('2FA setup result:', result)
+      
+      if (!result.success) {
+        console.error('2FA setup failed:', result.error)
+        authStore.setError(result.error || 'Failed to setup Two-Factor Authentication')
+        securityForm.twoFactorEnabled = false // Revert the toggle
+        return
+      }
+      
+      // Redirect to verification page for setup
+      if (result.success) {
+        router.push({
+          name: 'VerificationCode',
+          query: {
+            type: 'setup',
+            email: authStore.user?.email || ''
+          }
+        })
+      }
+      console.log('2FA setup initiated - showing QR code')
+    } catch (error: any) {
+      console.error('2FA setup error:', error)
+      authStore.setError('Failed to setup Two-Factor Authentication: ' + error.message)
+      securityForm.twoFactorEnabled = false // Revert the toggle
+    }
+  } else if (!securityForm.twoFactorEnabled && authStore.is2FAEnabled) {
+    // Disable 2FA - this would require confirmation and current password
+    const confirmed = confirm('Are you sure you want to disable Two-Factor Authentication? This will make your account less secure.')
+    if (!confirmed) {
+      securityForm.twoFactorEnabled = true // Revert the toggle
+      return
+    }
+    
+    try {
+      const result = await authStore.disable2FA()
+      if (result.success) {
+        console.log('2FA disabled successfully')
+        success('Two-Factor Authentication has been disabled.')
+      } else {
+        console.error('Failed to disable 2FA:', result.error)
+        authStore.setError(result.error || 'Failed to disable 2FA')
+        securityForm.twoFactorEnabled = true // Revert
+      }
+    } catch (error: any) {
+      console.error('Error disabling 2FA:', error)
+      authStore.setError('Failed to disable 2FA: ' + error.message)
+      securityForm.twoFactorEnabled = true // Revert
+    }
+  }
+}
+
+// Handle Login Alerts toggle
+const handleLoginAlertsToggle = async () => {
+  console.log('Login alerts toggle changed:', securityForm.loginAlerts)
+  
+  try {
+    // Save the preference immediately
+    const currentPrefs = authStore.user?.prefs as any || {}
+    const updatedPrefs = {
+      ...currentPrefs,
+      security: {
+        ...currentPrefs.security,
+        loginAlerts: securityForm.loginAlerts,
+        sessionTimeout: securityForm.sessionTimeout,
+        twoFactorEnabled: securityForm.twoFactorEnabled,
+        allowedDevices: securityForm.allowedDevices
+      }
+    }
+    
+    await authStore.updatePreferences(updatedPrefs)
+    
+    if (securityForm.loginAlerts) {
+      success('Login alerts enabled. You will be notified of new login attempts.')
+    } else {
+      success('Login alerts disabled. You will not receive notifications for new logins.')
+    }
+  } catch (error) {
+    console.error('Error updating login alerts preference:', error)
+    showError('Failed to update login alerts preference')
+    // Revert the toggle on error
+    securityForm.loginAlerts = !securityForm.loginAlerts
+  }
+}
+
+// Handle Session Timeout change
+const handleSessionTimeoutChange = async () => {
+  console.log('Session timeout changed:', securityForm.sessionTimeout)
+  
+  try {
+    // Save the preference immediately
+    const currentPrefs = authStore.user?.prefs as any || {}
+    const updatedPrefs = {
+      ...currentPrefs,
+      security: {
+        ...currentPrefs.security,
+        loginAlerts: securityForm.loginAlerts,
+        sessionTimeout: securityForm.sessionTimeout,
+        twoFactorEnabled: securityForm.twoFactorEnabled,
+        allowedDevices: securityForm.allowedDevices
+      }
+    }
+    
+    await authStore.updatePreferences(updatedPrefs)
+    
+    const timeoutText = securityForm.sessionTimeout === '0' ? 'Never' : 
+                       securityForm.sessionTimeout === '60' ? '1 hour' :
+                       securityForm.sessionTimeout === '120' ? '2 hours' :
+                       securityForm.sessionTimeout === '480' ? '8 hours' :
+                       securityForm.sessionTimeout === '1440' ? '24 hours' :
+                       `${securityForm.sessionTimeout} minutes`
+    
+    success(`Session timeout updated to: ${timeoutText}`)
+  } catch (error) {
+    console.error('Error updating session timeout:', error)
+    showError('Failed to update session timeout')
+  }
+}
+
 const deleteAccount = async () => {
   try {
     isSaving.value = true
@@ -248,6 +472,25 @@ const goBack = () => {
 const navigateToProfiles = () => {
   if (isEscort.value) {
     router.push('/escort/profiles')
+  }
+}
+
+// Send verification email
+const sendVerificationEmail = async () => {
+  try {
+    isSendingVerification.value = true
+    const result = await authStore.sendEmailVerification()
+    
+    if (result.success) {
+      success('Verification email sent! Please check your inbox.')
+    } else {
+      showError(result.error || 'Failed to send verification email')
+    }
+  } catch (error) {
+    console.error('Error sending verification email:', error)
+    showError('Failed to send verification email')
+  } finally {
+    isSendingVerification.value = false
   }
 }
 </script>
@@ -330,6 +573,27 @@ const navigateToProfiles = () => {
             <p>Update your personal information and contact details</p>
           </div>
           
+          <!-- Email Verification Alert -->
+          <div v-if="!authStore.isEmailVerified" class="verification-alert">
+            <div class="alert-icon">⚠️</div>
+            <div class="alert-content">
+              <h4>Email Verification Required</h4>
+              <p>Please verify your email address to access all features.</p>
+              <button @click="sendVerificationEmail" :disabled="isSendingVerification" class="btn btn-primary btn-sm">
+                {{ isSendingVerification ? 'Sending...' : 'Send Verification Email' }}
+              </button>
+            </div>
+          </div>
+          
+          <!-- Email Verified Badge -->
+          <div v-else class="verification-success">
+            <div class="success-icon">✅</div>
+            <div class="success-content">
+              <h4>Email Verified</h4>
+              <p>Your email address has been verified.</p>
+            </div>
+          </div>
+          
           <form @submit.prevent="saveAccountInfo" class="settings-form">
             <div class="form-grid">
               <div class="form-group">
@@ -378,12 +642,6 @@ const navigateToProfiles = () => {
               </div>
             </div>
             
-            <!-- Location -->
-            <div class="form-group">
-              <label>Location</label>
-              <LocationDropdowns v-model="accountForm.location" />
-            </div>
-            
             <!-- Bio -->
             <div class="form-group">
               <label for="bio">Bio</label>
@@ -394,18 +652,6 @@ const navigateToProfiles = () => {
                 rows="4"
                 class="form-textarea"
               ></textarea>
-            </div>
-            
-            <!-- Website -->
-            <div class="form-group">
-              <label for="website">Website</label>
-              <input
-                id="website"
-                v-model="accountForm.website"
-                type="url"
-                placeholder="https://your-website.com"
-                class="form-input"
-              />
             </div>
             
             <div class="form-actions">
@@ -486,6 +732,7 @@ const navigateToProfiles = () => {
                     v-model="securityForm.twoFactorEnabled"
                     type="checkbox"
                     class="toggle-input"
+                    @change="handle2FAToggle"
                   />
                   <span class="toggle-slider"></span>
                   <div class="toggle-content">
@@ -501,6 +748,7 @@ const navigateToProfiles = () => {
                     v-model="securityForm.loginAlerts"
                     type="checkbox"
                     class="toggle-input"
+                    @change="handleLoginAlertsToggle"
                   />
                   <span class="toggle-slider"></span>
                   <div class="toggle-content">
@@ -513,11 +761,13 @@ const navigateToProfiles = () => {
             
             <div class="form-group">
               <label for="sessionTimeout">Session Timeout (minutes)</label>
-              <select id="sessionTimeout" v-model="securityForm.sessionTimeout" class="form-select">
+              <select id="sessionTimeout" v-model="securityForm.sessionTimeout" @change="handleSessionTimeoutChange" class="form-select">
                 <option value="15">15 minutes</option>
                 <option value="30">30 minutes</option>
                 <option value="60">1 hour</option>
                 <option value="120">2 hours</option>
+                <option value="480">8 hours</option>
+                <option value="1440">24 hours</option>
                 <option value="0">Never</option>
               </select>
             </div>
@@ -545,32 +795,29 @@ const navigateToProfiles = () => {
               <div class="form-grid">
                 <div class="form-group">
                   <label for="language">Language</label>
-                  <select id="language" v-model="preferencesForm.language" class="form-select">
+                  <select id="language" v-model="preferencesForm.language" class="form-select" disabled>
                     <option value="en">English</option>
-                    <option value="es">Spanish</option>
-                    <option value="fr">French</option>
-                    <option value="de">German</option>
                   </select>
+                  <p class="help-text">Currently only English is supported</p>
                 </div>
                 
                 <div class="form-group">
                   <label for="timezone">Timezone</label>
-                  <select id="timezone" v-model="preferencesForm.timezone" class="form-select">
+                  <select id="timezone" v-model="preferencesForm.timezone" class="form-select" disabled>
                     <option value="UTC">UTC</option>
-                    <option value="America/New_York">Eastern Time</option>
-                    <option value="America/Chicago">Central Time</option>
-                    <option value="America/Denver">Mountain Time</option>
-                    <option value="America/Los_Angeles">Pacific Time</option>
                   </select>
+                  <p class="help-text">All times are displayed in UTC</p>
                 </div>
                 
                 <div class="form-group">
                   <label for="currency">Currency</label>
                   <select id="currency" v-model="preferencesForm.currency" class="form-select">
-                    <option value="USD">USD ($)</option>
-                    <option value="EUR">EUR (€)</option>
-                    <option value="GBP">GBP (£)</option>
-                    <option value="CAD">CAD ($)</option>
+                    <option value="USD">USD ($) - US Dollar</option>
+                    <option value="EUR">EUR (€) - Euro</option>
+                    <option value="GBP">GBP (£) - British Pound</option>
+                    <option value="CAD">CAD ($) - Canadian Dollar</option>
+                    <option value="XAF">XAF - CFA Franc BEAC</option>
+                    <option value="XOF">XOF - CFA Franc BCEAO</option>
                   </select>
                 </div>
               </div>
@@ -819,6 +1066,8 @@ const navigateToProfiles = () => {
         </div>
       </div>
     </div>
+
+    <!-- 2FA setup now handled by dedicated VerificationCode page -->
   </div>
 </template>
 
@@ -1113,6 +1362,20 @@ const navigateToProfiles = () => {
         border-color: var(--color-accent);
         box-shadow: 0 0 0 3px var(--color-accent-light);
       }
+      
+      &:disabled {
+        background-color: #f3f4f6;
+        color: #6b7280;
+        cursor: not-allowed;
+        opacity: 0.7;
+      }
+    }
+    
+    .help-text {
+      margin-top: 0.5rem;
+      font-size: 0.875rem;
+      color: #6b7280;
+      font-style: italic;
     }
     
     .form-textarea {
@@ -1477,6 +1740,252 @@ const navigateToProfiles = () => {
     
     &:hover:not(:disabled) {
       background: #b91c1c;
+    }
+  }
+}
+
+/* 2FA Setup Modal Styles */
+.modal-content.large {
+  max-width: 600px;
+}
+
+.setup-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  
+  .step {
+    padding: 1.5rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #f9fafb;
+    
+    h4 {
+      margin: 0 0 0.5rem 0;
+      color: #374151;
+      font-size: 1.1rem;
+    }
+    
+    p {
+      margin: 0.5rem 0;
+      color: #6b7280;
+      line-height: 1.5;
+    }
+  }
+}
+
+.qr-code-container {
+  display: flex;
+  justify-content: center;
+  margin: 1rem 0;
+  padding: 1rem;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  
+  .qr-code-text {
+    text-align: center;
+    width: 100%;
+    
+    code {
+      display: block;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 0.9rem;
+      padding: 1rem;
+      background: #f3f4f6;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      margin: 0.5rem 0;
+      word-break: break-all;
+      letter-spacing: 1px;
+    }
+  }
+}
+
+.email-message {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  padding: 1rem;
+  border-radius: 8px;
+  margin: 1rem 0;
+  color: #16a34a;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  
+  .success-icon {
+    font-size: 1.5rem;
+  }
+}
+
+.resend-section {
+  text-align: center;
+  margin-top: 1rem;
+  
+  p {
+    color: #6b7280;
+    font-size: 0.875rem;
+    margin-bottom: 0.5rem;
+  }
+}
+
+.info-box {
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  padding: 1rem;
+  border-radius: 8px;
+  
+  ul {
+    margin-top: 0.5rem;
+    padding-left: 1.5rem;
+    
+    li {
+      margin-bottom: 0.5rem;
+      color: #4b5563;
+    }
+  }
+}
+
+.verification-input {
+  display: flex;
+  justify-content: center;
+  margin: 1rem 0;
+  
+  .verification-code-input {
+    width: 200px;
+    padding: 1rem;
+    font-size: 1.5rem;
+    text-align: center;
+    letter-spacing: 0.5rem;
+    border: 2px solid #e5e7eb;
+    border-radius: 8px;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    
+    &:focus {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+    
+    &:disabled {
+      background-color: #f3f4f6;
+      cursor: not-allowed;
+    }
+  }
+}
+
+.backup-codes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  
+  .backup-code {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.9rem;
+    padding: 0.5rem;
+    background: #f3f4f6;
+    border-radius: 4px;
+    text-align: center;
+    border: 1px solid #e5e7eb;
+  }
+}
+
+.btn-sm {
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+}
+
+.setup-instructions {
+  margin-top: 1rem;
+  
+  ol {
+    text-align: left;
+    padding-left: 1.5rem;
+    
+    li {
+      margin-bottom: 0.5rem;
+      line-height: 1.4;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .modal-content.large {
+    max-width: 95vw;
+    margin: 1rem;
+  }
+  
+  .backup-codes {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Email Verification Styles */
+.verification-alert {
+  background: #fef3c7;
+  border: 1px solid #fbbf24;
+  border-radius: var(--border-radius-lg);
+  padding: var(--spacing-lg);
+  margin-bottom: var(--spacing-xl);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  
+  .alert-icon {
+    font-size: 2rem;
+    flex-shrink: 0;
+  }
+  
+  .alert-content {
+    flex: 1;
+    
+    h4 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #92400e;
+      margin-bottom: var(--spacing-xs);
+    }
+    
+    p {
+      color: #78350f;
+      margin-bottom: var(--spacing-md);
+    }
+  }
+}
+
+.verification-success {
+  background: #d1fae5;
+  border: 1px solid #34d399;
+  border-radius: var(--border-radius-lg);
+  padding: var(--spacing-lg);
+  margin-bottom: var(--spacing-xl);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  
+  .success-icon {
+    font-size: 2rem;
+    flex-shrink: 0;
+  }
+  
+  .success-content {
+    flex: 1;
+    
+    h4 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #065f46;
+      margin-bottom: var(--spacing-xs);
+    }
+    
+    p {
+      color: #047857;
+      margin: 0;
     }
   }
 }

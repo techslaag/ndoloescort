@@ -2,6 +2,7 @@
 import { ref, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
+import { handleAppwriteError } from '../../utils/appwriteErrors'
 import ErrorAlert from '../../components/ErrorAlert.vue'
 
 const router = useRouter()
@@ -22,6 +23,7 @@ const isLoading = ref(false)
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 const showTermsError = ref(false)
+const passwordStrength = ref({ score: 0, feedback: '' })
 
 // Reset loading state when component is unmounted or route changes
 onUnmounted(() => {
@@ -49,6 +51,14 @@ const toggleConfirmPassword = () => {
   }
 }
 
+// Check password strength on input
+const checkPasswordStrength = () => {
+  const strength = authStore.validatePasswordStrength(form.value.password)
+  passwordStrength.value = strength
+}
+
+watch(() => form.value.password, checkPasswordStrength)
+
 const handleSignup = async () => {
   // Validation
   if (!form.value.firstName || !form.value.lastName || !form.value.email || !form.value.password) {
@@ -61,8 +71,9 @@ const handleSignup = async () => {
     return
   }
 
-  if (form.value.password.length < 8) {
-    authStore.setError('Password must be at least 8 characters long', true)
+  // Check password strength
+  if (passwordStrength.value.score < 2) {
+    authStore.setError('Please choose a stronger password. ' + passwordStrength.value.feedback, true)
     return
   }
 
@@ -223,6 +234,22 @@ const openPrivacy = () => {
             </svg>
           </button>
         </div>
+        <div v-if="form.password" class="password-strength">
+          <div class="strength-bar">
+            <div 
+              class="strength-fill" 
+              :class="`strength-${passwordStrength.score}`"
+              :style="{ width: `${(passwordStrength.score / 4) * 100}%` }"
+            ></div>
+          </div>
+          <p class="strength-text" :class="`strength-${passwordStrength.score}`">
+            {{ passwordStrength.score === 0 ? 'Very Weak' : 
+               passwordStrength.score === 1 ? 'Weak' :
+               passwordStrength.score === 2 ? 'Fair' :
+               passwordStrength.score === 3 ? 'Good' : 'Strong' }}
+            <span v-if="passwordStrength.feedback" class="feedback">- {{ passwordStrength.feedback }}</span>
+          </p>
+        </div>
       </div>
       
       <div class="form-group">
@@ -342,6 +369,47 @@ const openPrivacy = () => {
     
     &:hover {
       color: var(--color-text-dark);
+    }
+  }
+}
+
+.password-strength {
+  margin-top: 8px;
+  
+  .strength-bar {
+    height: 4px;
+    background-color: #e5e7eb;
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 4px;
+  }
+  
+  .strength-fill {
+    height: 100%;
+    transition: all 0.3s ease;
+    border-radius: 2px;
+    
+    &.strength-0 { background-color: #ef4444; }
+    &.strength-1 { background-color: #f97316; }
+    &.strength-2 { background-color: #eab308; }
+    &.strength-3 { background-color: #84cc16; }
+    &.strength-4 { background-color: #22c55e; }
+  }
+  
+  .strength-text {
+    font-size: 0.75rem;
+    margin: 0;
+    font-weight: 500;
+    
+    &.strength-0 { color: #ef4444; }
+    &.strength-1 { color: #f97316; }
+    &.strength-2 { color: #eab308; }
+    &.strength-3 { color: #84cc16; }
+    &.strength-4 { color: #22c55e; }
+    
+    .feedback {
+      font-weight: normal;
+      color: #6b7280;
     }
   }
 }

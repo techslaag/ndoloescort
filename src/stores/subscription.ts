@@ -41,11 +41,13 @@ export const useSubscriptionStore = defineStore('subscription', () => {
   })
 
   const canCreateProfile = computed(() => {
-    if (!currentUsage.value) return false
+    if (!currentUsage.value) return true // Default to true for free tier if no usage data
     return currentUsage.value.profilesRemaining > 0
   })
 
   const profilesRemaining = computed(() => {
+    // For free tier, default to 1 profile if no usage data
+    if (!currentUsage.value && isFreeTier.value) return 1
     return currentUsage.value?.profilesRemaining || 0
   })
 

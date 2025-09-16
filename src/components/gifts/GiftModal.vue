@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '../../stores/auth'
 import { useSubscriptionStore } from '../../stores/subscription'
 import { featureAccessService } from '../../services/featureAccessService'
+import { flutterwaveService } from '../../services/flutterwaveService'
+import FlutterwavePayment from '../payment/FlutterwavePayment.vue'
 
 interface Gift {
   id: string
@@ -32,6 +34,8 @@ const selectedGift = ref<Gift | null>(null)
 const isSending = ref(false)
 const hasAccess = ref(true)
 const accessError = ref<string | null>(null)
+const showPaymentModal = ref(false)
+const paymentRef = ref<InstanceType<typeof FlutterwavePayment>>()
 
 // Available gifts
 const gifts: Gift[] = [
@@ -68,25 +72,20 @@ const selectGift = (gift: Gift) => {
 
 // Send the selected gift
 const sendGift = async () => {
-  if (!selectedGift.value || !canAfford.value || isSending.value) return
+  if (!selectedGift.value || isSending.value) return
   
+  // Show payment modal for real money payment
+  showPaymentModal.value = true
+}
+
+// Handle payment success
+const handlePaymentSuccess = async (response: any) => {
   try {
     isSending.value = true
-    
-    // In real app, this would:
-    // 1. Process payment
-    // 2. Record gift transaction
-    // 3. Notify recipient
-    // 4. Show animation
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    
-    // Deduct from balance
-    userBalance.value -= selectedGift.value.price
+    showPaymentModal.value = false
     
     // Emit success event
-    emit('gift-sent', selectedGift.value)
+    emit('gift-sent', selectedGift.value!)
     
     // Close modal after short delay
     setTimeout(() => {
@@ -100,10 +99,22 @@ const sendGift = async () => {
   }
 }
 
-// Add funds
+// Handle payment error
+const handlePaymentError = (error: Error) => {
+  console.error('Payment failed:', error)
+  showPaymentModal.value = false
+  // You might want to show an error message to the user
+}
+
+// Handle payment modal close
+const handlePaymentClose = () => {
+  showPaymentModal.value = false
+}
+
+// Add funds - removed as we use direct payment now
 const addFunds = () => {
-  // Navigate to payment/wallet page
-  console.log('Navigate to add funds')
+  // Direct payment through Flutterwave
+  console.log('Direct payment through Flutterwave')
 }
 
 onMounted(() => {
@@ -126,16 +137,7 @@ onMounted(() => {
 
       <!-- Content -->
       <div class="modal-content" v-if="hasAccess">
-        <!-- Balance -->
-        <div class="balance-section">
-          <div class="balance">
-            <span class="label">Your Balance:</span>
-            <span class="amount">${{ userBalance.toLocaleString() }}</span>
-          </div>
-          <button @click="addFunds" class="add-funds-btn">
-            Add Funds
-          </button>
-        </div>
+        <!-- Remove balance section as we use direct payment -->
 
         <!-- Gift Grid -->
         <div class="gifts-grid">
@@ -159,9 +161,9 @@ onMounted(() => {
             <span class="name">{{ selectedGift.name }}</span>
             <span class="price">${{ selectedGift.price }}</span>
           </div>
-          
-          <div v-if="!canAfford" class="insufficient-funds">
-            Insufficient balance. Please add funds to continue.
+          <!-- Price info -->
+          <div class="price-info">
+            You will be charged <strong>${{ selectedGift.price }}</strong> for this gift
           </div>
         </div>
 
@@ -173,7 +175,7 @@ onMounted(() => {
           <button 
             @click="sendGift" 
             class="send-btn"
-            :disabled="!selectedGift || !canAfford || isSending"
+            :disabled="!selectedGift || isSending"
           >
             <span v-if="isSending">Sending...</span>
             <span v-else>Send Gift</span>
@@ -189,6 +191,29 @@ onMounted(() => {
         <p>{{ accessError || 'Gift feature not available' }}</p>
       </div>
     </div>
+    
+    <!-- Flutterwave Payment Modal -->
+    <Teleport to="body" v-if="showPaymentModal && selectedGift">
+      <div class="payment-modal-overlay" @click="handlePaymentClose">
+        <div class="payment-modal-content" @click.stop>
+          <FlutterwavePayment
+            ref="paymentRef"
+            :amount="selectedGift.price"
+            :description="`Gift ${selectedGift.name} for ${recipientName}`"
+            payment-type="gift"
+            :metadata="{
+              giftType: selectedGift.id,
+              giftName: selectedGift.name,
+              recipientId: recipientId,
+              recipientName: recipientName
+            }"
+            @payment-success="handlePaymentSuccess"
+            @payment-error="handlePaymentError"
+            @payment-closed="handlePaymentClose"
+          />
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -456,6 +481,46 @@ onMounted(() => {
     transform: translateY(0);
     opacity: 1;
   }
+}
+
+// Price info
+.price-info {
+  text-align: center;
+  padding: 1rem;
+  background: #e3f2fd;
+  border-radius: 8px;
+  color: #1976d2;
+  font-size: 0.95rem;
+  
+  strong {
+    font-weight: 600;
+  }
+}
+
+// Payment modal overlay
+.payment-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  backdrop-filter: blur(4px);
+}
+
+.payment-modal-content {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  max-width: 600px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 2rem;
 }
 
 // Mobile Responsiveness
