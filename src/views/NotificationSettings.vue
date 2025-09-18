@@ -505,7 +505,6 @@ onMounted(() => {
 .notification-settings-page {
   min-height: 100vh;
   background: var(--color-background);
-  padding-top: 70px;
 }
 
 /* Header */

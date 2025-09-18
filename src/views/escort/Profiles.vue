@@ -7,7 +7,6 @@ import { useMessagingStore } from '../../stores/messaging'
 import ErrorAlert from '../../components/ErrorAlert.vue'
 import ProfileVerificationButton from '../../components/escort/ProfileVerificationButton.vue'
 import DeleteProfileModal from '../../components/modals/DeleteProfileModal.vue'
-import ProfileCompletionStatus from '../../components/profile/ProfileCompletionStatus.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -197,26 +196,6 @@ const closeDeleteModal = () => {
   }
 }
 
-// Test function for direct deletion without modal
-const testDirectDelete = async (profile: any) => {
-  const profileId = profile.$id || profile.id
-  console.log('=== TEST DIRECT DELETE ===')
-  console.log('Profile to delete:', { profileId, name: profile.name })
-  
-  if (!confirm(`Are you sure you want to delete ${profile.name || 'this profile'}?`)) {
-    return
-  }
-  
-  try {
-    const result = await profileStore.deleteProfile(profileId)
-    console.log('Direct delete successful:', result)
-    alert('Profile deleted successfully!')
-  } catch (error: any) {
-    console.error('Direct delete failed:', error)
-    alert(`Delete failed: ${error.message}`)
-  }
-}
-
 
 </script>
 
@@ -266,7 +245,9 @@ const testDirectDelete = async (profile: any) => {
           :style="{
             backgroundImage: (profile as any).media && (profile as any).media.length > 0 && ((profile as any).media[0].url || (profile as any).media[0].thumbnailUrl) 
               ? `url('${(profile as any).media[0].url || (profile as any).media[0].thumbnailUrl}')` 
-              : 'none'
+              : 'none',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center'
           }"
         >
           <div class="background-overlay"></div>
@@ -275,44 +256,15 @@ const testDirectDelete = async (profile: any) => {
         <div class="profile-content">
           <!-- Profile Header -->
           <div class="profile-header">
-            <div class="profile-avatar-section">
-              <div v-if="(profile as any).media && (profile as any).media.length > 0" class="profile-avatar">
-                <img 
-                  :src="(profile as any).media[0].thumbnailUrl || (profile as any).media[0].url" 
-                  :alt="profile.name"
-                  loading="lazy"
-                />
-                <div v-if="profile.verification?.isVerified" class="verified-badge">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z"/>
-                  </svg>
-                </div>
-              </div>
-              <div v-else class="profile-avatar placeholder">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>
-                </svg>
-              </div>
-            </div>
-            
             <div class="profile-info">
               <h3 class="profile-name">
                 {{ profile.name }}
+                <span v-if="profile.verification?.isVerified" class="verified-icon">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2L3.5 7v6c0 5.55 3.84 10.74 8.5 12 4.66-1.26 8.5-6.45 8.5-12V7L12 2zm-2 16l-4-4 1.41-1.41L10 15.17l6.59-6.59L18 10l-8 8z"/>
+                  </svg>
+                </span>
               </h3>
-              <div class="profile-details">
-                <span class="detail-item">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
-                  </svg>
-                  {{ (profile as any).locationCity || 'Unknown' }}
-                </span>
-                <span class="detail-item">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M9 11H7v2h2v-2zm4 0h-2v2h2v-2zm4 0h-2v2h2v-2zm2-7h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V9h14v11z"/>
-                  </svg>
-                  {{ profile.age }} years
-                </span>
-              </div>
             </div>
             
             <div class="profile-status-section">
@@ -339,13 +291,6 @@ const testDirectDelete = async (profile: any) => {
             </div>
           </div>
           
-          <!-- Profile Completion Status -->
-          <ProfileCompletionStatus 
-            :profile="profile"
-            :show-steps="false"
-            :show-actions="false"
-            :show-missing-fields="false"
-          />
           
           <!-- Quick Actions -->
           <div class="quick-actions">
@@ -399,15 +344,6 @@ const testDirectDelete = async (profile: any) => {
               </svg>
             </button>
             
-            <!-- Test direct delete button -->
-            <button 
-              @click="testDirectDelete(profile)" 
-              class="test-delete-btn"
-              title="Test direct delete"
-              style="background: #f00; color: white; padding: 4px 8px; border-radius: 4px; font-size: 10px; margin-left: 4px;"
-            >
-              TEST
-            </button>
           </div>
         </div>
       </div>
@@ -551,13 +487,18 @@ const testDirectDelete = async (profile: any) => {
     transform: translateY(-4px);
     box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12);
     
-    .card-background img {
-      transform: scale(1.05);
+    .card-background {
+      &::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: rgba(0,0,0,0.1);
+        transition: all 0.3s ease;
+      }
     }
     
     .quick-actions {
-      opacity: 1;
-      transform: translateY(0);
+      transform: translateY(-2px);
     }
   }
   
@@ -566,7 +507,7 @@ const testDirectDelete = async (profile: any) => {
     top: 0;
     left: 0;
     right: 0;
-    height: 180px;
+    height: 200px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     overflow: hidden;
     
@@ -578,17 +519,10 @@ const testDirectDelete = async (profile: any) => {
         repeating-linear-gradient(45deg, transparent, transparent 35px, rgba(255,255,255,.05) 35px, rgba(255,255,255,.05) 70px);
     }
     
-    img {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      transition: transform 0.3s ease;
-    }
-    
     .background-overlay {
       position: absolute;
       inset: 0;
-      background: linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.4) 100%);
+      background: linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.6) 100%);
     }
   }
   
@@ -598,65 +532,20 @@ const testDirectDelete = async (profile: any) => {
     display: flex;
     flex-direction: column;
     padding: var(--spacing-lg);
-    padding-top: 140px;
+    padding-top: 160px;
   }
   
   .profile-header {
     margin-bottom: var(--spacing-lg);
     display: flex;
     align-items: flex-start;
+    justify-content: space-between;
     gap: var(--spacing-md);
     
     @media (max-width: 480px) {
       flex-direction: column;
-      align-items: center;
-      text-align: center;
+      align-items: stretch;
       gap: var(--spacing-sm);
-    }
-    
-    .profile-avatar-section {
-      position: relative;
-      
-      .profile-avatar {
-        width: 80px;
-        height: 80px;
-        border-radius: 50%;
-        overflow: hidden;
-        border: 4px solid white;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-        position: relative;
-        margin-top: -40px;
-        background: white;
-        
-        img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-        
-        &.placeholder {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background: #f3f4f6;
-          color: #9ca3af;
-        }
-        
-        .verified-badge {
-          position: absolute;
-          bottom: 0;
-          right: 0;
-          width: 24px;
-          height: 24px;
-          background: #10b981;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          border: 2px solid white;
-        }
-      }
     }
     
     .profile-info {
@@ -664,40 +553,29 @@ const testDirectDelete = async (profile: any) => {
       min-width: 0;
       
       .profile-name {
-        font-size: 1.25rem;
+        font-size: 1.35rem;
         font-weight: 600;
         color: #1f2937;
-        margin: 0 0 var(--spacing-xs) 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      
-      .profile-details {
+        margin: 0;
         display: flex;
-        gap: var(--spacing-md);
-        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--spacing-xs);
         
-        @media (max-width: 480px) {
-          justify-content: center;
-          gap: var(--spacing-sm);
-        }
-        
-        .detail-item {
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          color: #6b7280;
-          font-size: 0.875rem;
+        .verified-icon {
+          display: inline-flex;
+          color: #10b981;
           
           svg {
-            opacity: 0.6;
+            width: 20px;
+            height: 20px;
           }
         }
       }
     }
     
     .profile-status-section {
+      flex-shrink: 0;
+      
       .status-indicator {
         display: flex;
         align-items: center;
@@ -778,8 +656,8 @@ const testDirectDelete = async (profile: any) => {
     display: flex;
     gap: var(--spacing-sm);
     margin-top: auto;
-    opacity: 0;
-    transform: translateY(10px);
+    opacity: 1;
+    transform: translateY(0);
     transition: all 0.3s ease;
     
     .action-btn {
@@ -842,7 +720,6 @@ const testDirectDelete = async (profile: any) => {
     padding: var(--spacing-md) var(--spacing-lg);
     background: #f9fafb;
     border-top: 1px solid #e5e7eb;
-    margin: 0 calc(-1 * var(--spacing-lg)) calc(-1 * var(--spacing-lg));
     
     .footer-actions {
       display: flex;
@@ -980,23 +857,15 @@ const testDirectDelete = async (profile: any) => {
     min-height: 380px;
     
     .card-background {
-      height: 140px;
+      height: 160px;
     }
     
     .profile-content {
       padding: var(--spacing-md);
-      padding-top: 100px;
+      padding-top: 120px;
     }
     
     .profile-header {
-      .profile-avatar-section {
-        .profile-avatar {
-          width: 60px;
-          height: 60px;
-          margin-top: -30px;
-        }
-      }
-      
       .profile-info {
         .profile-name {
           font-size: 1.125rem;
@@ -1060,38 +929,14 @@ const testDirectDelete = async (profile: any) => {
     .profile-header {
       margin-bottom: var(--spacing-md);
       
-      .profile-avatar-section {
-        .profile-avatar {
-          width: 50px;
-          height: 50px;
-          margin-top: -25px;
-          
-          .verified-badge {
-            width: 20px;
-            height: 20px;
-            
-            svg {
-              width: 12px;
-              height: 12px;
-            }
-          }
-        }
-      }
-      
       .profile-info {
         .profile-name {
           font-size: 1rem;
           margin-bottom: var(--spacing-xs);
-        }
-        
-        .profile-details {
-          .detail-item {
-            font-size: 0.8rem;
-            
-            svg {
-              width: 12px;
-              height: 12px;
-            }
+          
+          .verified-icon svg {
+            width: 16px;
+            height: 16px;
           }
         }
       }

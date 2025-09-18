@@ -380,9 +380,6 @@ const navigateToContact = () => {
 </template>
 
 <style scoped lang="scss">
-.terms-page {
-  padding-top: 70px;
-}
 
 .page-header {
   background-color: var(--color-primary-dark);

@@ -93,6 +93,7 @@ export const useAuthStore = defineStore('auth', () => {
           userType: userType,
           registrationDate: new Date().toISOString(),
           isVerified: false,
+          // General preferences at root level
           language: 'en',
           timezone: 'UTC',
           currency: 'USD',
@@ -102,6 +103,10 @@ export const useAuthStore = defineStore('auth', () => {
           profileVisibility: 'public',
           showOnlineStatus: true,
           allowMessages: true,
+          pushNotifications: false,
+          autoReply: false,
+          autoReplyMessage: 'Thank you for your message. I will get back to you soon!',
+          // Notification settings (optional - for advanced notifications)
           notificationSettings: {
             messages: true,
             bookingRequests: true,
@@ -110,6 +115,7 @@ export const useAuthStore = defineStore('auth', () => {
             promotions: false,
             securityAlerts: true
           },
+          // Security settings
           security: {
             twoFactorEnabled: false,
             loginAlerts: true,

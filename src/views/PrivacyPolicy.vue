@@ -296,9 +296,6 @@ const navigateToContact = () => {
 </template>
 
 <style scoped lang="scss">
-.privacy-policy-page {
-  padding-top: 70px;
-}
 
 .page-header {
   background-color: var(--color-primary-dark);

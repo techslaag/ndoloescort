@@ -61,6 +61,7 @@ export interface UserSubscription {
 }
 
 export interface SubscriptionUsage {
+  id?: string // Document ID
   userId: string
   subscriptionId: string
   period: string // YYYY-MM format

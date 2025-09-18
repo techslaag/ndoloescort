@@ -407,9 +407,6 @@ const emergencyNumber = '+1 (555) 911-HELP'
 </template>
 
 <style scoped lang="scss">
-.safety-guide-page {
-  padding-top: 70px;
-}
 
 .page-header {
   background-color: var(--color-primary-dark);

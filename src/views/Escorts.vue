@@ -122,7 +122,7 @@ const navigateToProfile = (id: number) => {
 
 <template>
   <div class="escorts-page">
-    <div class="page-header">
+    <div class="page-header" v-if="false">
       <div class="container">
         <h1>Our Elite Companions</h1>
         <p>Browse our selection of sophisticated and elegant companions</p>
@@ -220,6 +220,7 @@ const navigateToProfile = (id: number) => {
   border-radius: var(--border-radius-md);
   padding: var(--spacing-lg);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  margin-top: var(--spacing-xl);
   margin-bottom: var(--spacing-xl);
 }
 

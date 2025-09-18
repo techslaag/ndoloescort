@@ -16,6 +16,10 @@ const showPasswordForm = ref(false)
 // Removed old 2FA setup modal - now using dedicated VerificationCode page
 const isSendingVerification = ref(false)
 
+// Billing related data
+const billingFilter = ref('all')
+const billingHistory = ref<any[]>([])
+
 // Default preferences for all users
 const DEFAULT_PREFERENCES = {
   language: 'en',
@@ -84,32 +88,102 @@ onMounted(() => {
     
     // Preferences - merge saved preferences with defaults
     const prefs = authStore.user.prefs as any
-    if (prefs?.preferences) {
-      // Merge saved preferences with defaults (defaults take precedence for missing values)
-      Object.assign(preferencesForm, { ...DEFAULT_PREFERENCES, ...prefs.preferences })
-    } else {
-      // No saved preferences, use defaults
-      Object.assign(preferencesForm, DEFAULT_PREFERENCES)
+    
+    // Read preferences from the actual user data structure
+    const userPrefs = {
+      language: prefs?.language || DEFAULT_PREFERENCES.language,
+      timezone: prefs?.timezone || DEFAULT_PREFERENCES.timezone,
+      currency: prefs?.currency || DEFAULT_PREFERENCES.currency,
+      emailNotifications: prefs?.emailNotifications !== undefined ? prefs.emailNotifications : DEFAULT_PREFERENCES.emailNotifications,
+      smsNotifications: prefs?.smsNotifications !== undefined ? prefs.smsNotifications : DEFAULT_PREFERENCES.smsNotifications,
+      marketingEmails: prefs?.marketingEmails !== undefined ? prefs.marketingEmails : DEFAULT_PREFERENCES.marketingEmails,
+      profileVisibility: prefs?.profileVisibility || DEFAULT_PREFERENCES.profileVisibility,
+      showOnlineStatus: prefs?.showOnlineStatus !== undefined ? prefs.showOnlineStatus : DEFAULT_PREFERENCES.showOnlineStatus,
+      allowMessages: prefs?.allowMessages !== undefined ? prefs.allowMessages : DEFAULT_PREFERENCES.allowMessages,
+      pushNotifications: prefs?.pushNotifications !== undefined ? prefs.pushNotifications : DEFAULT_PREFERENCES.pushNotifications,
+      autoReply: prefs?.autoReply !== undefined ? prefs.autoReply : DEFAULT_PREFERENCES.autoReply,
+      autoReplyMessage: prefs?.autoReplyMessage || DEFAULT_PREFERENCES.autoReplyMessage
     }
-    // Always force language and timezone to defaults
+    
+    Object.assign(preferencesForm, userPrefs)
+    
+    // Always force language and timezone to defaults (non-editable)
     preferencesForm.language = 'en'
     preferencesForm.timezone = 'UTC'
     
     // Security - merge saved security settings with defaults
-    if (prefs?.security) {
-      // Merge saved security settings with defaults
-      Object.assign(securityForm, { ...DEFAULT_SECURITY, ...prefs.security })
-    } else {
-      // No saved security settings, use defaults
-      Object.assign(securityForm, DEFAULT_SECURITY)
+    const securityPrefs = prefs?.security || {}
+    
+    const userSecurity = {
+      twoFactorEnabled: securityPrefs.twoFactorEnabled !== undefined ? securityPrefs.twoFactorEnabled : DEFAULT_SECURITY.twoFactorEnabled,
+      loginAlerts: securityPrefs.loginAlerts !== undefined ? securityPrefs.loginAlerts : DEFAULT_SECURITY.loginAlerts,
+      sessionTimeout: securityPrefs.sessionTimeout || DEFAULT_SECURITY.sessionTimeout,
+      allowedDevices: securityPrefs.allowedDevices || DEFAULT_SECURITY.allowedDevices
     }
+    
+    Object.assign(securityForm, userSecurity)
     
     // Check and sync 2FA status
     authStore.check2FAStatus().then(() => {
       securityForm.twoFactorEnabled = authStore.is2FAEnabled
     })
   }
+  
+  // Load billing history for escorts
+  if (isEscort.value) {
+    loadBillingHistory()
+  }
 })
+
+// Billing history functions
+const loadBillingHistory = async () => {
+  // TODO: Load actual billing history from backend
+  // For now, using mock data
+  billingHistory.value = [
+    // Example transactions - replace with actual API call
+  ]
+}
+
+const filteredBillingHistory = computed(() => {
+  if (billingFilter.value === 'all') {
+    return billingHistory.value
+  }
+  return billingHistory.value.filter(transaction => transaction.type === billingFilter.value)
+})
+
+const formatDate = (dateString: string) => {
+  const date = new Date(dateString)
+  return date.toLocaleDateString('en-US', { 
+    year: 'numeric', 
+    month: 'short', 
+    day: 'numeric' 
+  })
+}
+
+const formatCurrency = (amount: number, currency: string = 'USD') => {
+  const symbol = {
+    USD: '$',
+    EUR: '€',
+    GBP: '£',
+    CAD: 'C$',
+    XAF: 'XAF ',
+    XOF: 'XOF '
+  }[currency] || currency + ' '
+  
+  const formattedAmount = Math.abs(amount).toFixed(2)
+  return `${amount < 0 ? '-' : ''}${symbol}${formattedAmount}`
+}
+
+const formatTransactionType = (type: string) => {
+  const typeLabels: Record<string, string> = {
+    subscription: 'Subscription',
+    tokens: 'Token Purchase',
+    gifts: 'Gift Purchase',
+    withdrawal: 'Withdrawal',
+    refund: 'Refund'
+  }
+  return typeLabels[type] || type
+}
 
 // Tab management
 const tabs = [
@@ -212,14 +286,23 @@ const savePreferences = async () => {
     preferencesForm.language = 'en'
     preferencesForm.timezone = 'UTC'
     
-    // Save preferences with the complete structure
+    // Save preferences directly to the root level (matching Appwrite structure)
     const currentPrefs = authStore.user?.prefs as any || {}
     const updatedPrefs = {
       ...currentPrefs,
-      preferences: {
-        ...DEFAULT_PREFERENCES,
-        ...preferencesForm
-      }
+      // Save preferences at root level
+      language: preferencesForm.language,
+      timezone: preferencesForm.timezone,
+      currency: preferencesForm.currency,
+      emailNotifications: preferencesForm.emailNotifications,
+      smsNotifications: preferencesForm.smsNotifications,
+      marketingEmails: preferencesForm.marketingEmails,
+      profileVisibility: preferencesForm.profileVisibility,
+      showOnlineStatus: preferencesForm.showOnlineStatus,
+      allowMessages: preferencesForm.allowMessages,
+      pushNotifications: preferencesForm.pushNotifications,
+      autoReply: preferencesForm.autoReply,
+      autoReplyMessage: preferencesForm.autoReplyMessage
     }
     
     await authStore.updatePreferences(updatedPrefs)
@@ -469,11 +552,6 @@ const goBack = () => {
   router.back()
 }
 
-const navigateToProfiles = () => {
-  if (isEscort.value) {
-    router.push('/escort/profiles')
-  }
-}
 
 // Send verification email
 const sendVerificationEmail = async () => {
@@ -550,18 +628,7 @@ const sendVerificationEmail = async () => {
           </button>
         </nav>
         
-        <!-- Quick Actions -->
-        <div class="quick-actions">
-          <button v-if="isEscort" @click="navigateToProfiles" class="quick-action">
-            <span class="action-icon">📝</span>
-            <span class="action-label">Manage Profiles</span>
-          </button>
-          
-          <button @click="router.push('/escort/dashboard')" v-if="isEscort" class="quick-action">
-            <span class="action-icon">📊</span>
-            <span class="action-label">Dashboard</span>
-          </button>
-        </div>
+        <!-- Quick Actions section removed -->
       </div>
       
       <!-- Content Area -->
@@ -827,7 +894,7 @@ const sendVerificationEmail = async () => {
             <div class="preference-group">
               <h3>Notifications</h3>
               
-              <div class="notification-banner">
+              <div v-if="false" class="notification-banner">
                 <div class="banner-content">
                   <div class="banner-icon">🔔</div>
                   <div class="banner-text">
@@ -982,33 +1049,87 @@ const sendVerificationEmail = async () => {
         <!-- Billing Tab (Escort Only) -->
         <div v-if="activeTab === 'billing' && isEscort" class="settings-section">
           <div class="section-header">
-            <h2>Billing & Payments</h2>
-            <p>Manage your payment methods and billing information</p>
+            <h2>Billing</h2>
+            <p>Manage your billing information</p>
           </div>
           
-          <div class="billing-cards">
-            <div class="billing-card">
-              <div class="card-header">
-                <h3>Payment Methods</h3>
-                <button class="btn btn-outline">Add Payment Method</button>
+          <!-- Billing History -->
+          <div class="billing-section">
+            <div class="billing-header">
+              <h3>Billing History</h3>
+              <div class="billing-filters">
+                <select v-model="billingFilter" class="filter-select">
+                  <option value="all">All Transactions</option>
+                  <option value="subscriptions">Subscriptions</option>
+                  <option value="tokens">Token Purchases</option>
+                  <option value="gifts">Gift Purchases</option>
+                  <option value="withdrawals">Withdrawals</option>
+                </select>
               </div>
-              <p class="card-description">No payment methods added yet</p>
             </div>
             
-            <div class="billing-card">
-              <div class="card-header">
-                <h3>Billing History</h3>
-                <button class="btn btn-outline">View All</button>
-              </div>
-              <p class="card-description">No billing history available</p>
+            <div v-if="billingHistory.length === 0" class="empty-state">
+              <div class="empty-icon">💰</div>
+              <h4>No billing history</h4>
+              <p>Your transaction history will appear here</p>
             </div>
             
-            <div class="billing-card">
-              <div class="card-header">
-                <h3>Tax Information</h3>
-                <button class="btn btn-outline">Update</button>
+            <div v-else class="billing-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th>Type</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="transaction in filteredBillingHistory" :key="transaction.id">
+                    <td>{{ formatDate(transaction.date) }}</td>
+                    <td>{{ transaction.description }}</td>
+                    <td>
+                      <span :class="['transaction-type', transaction.type]">
+                        {{ formatTransactionType(transaction.type) }}
+                      </span>
+                    </td>
+                    <td :class="transaction.type === 'withdrawal' ? 'amount-negative' : 'amount-positive'">
+                      {{ formatCurrency(transaction.amount, transaction.currency) }}
+                    </td>
+                    <td>
+                      <span :class="['status-badge', transaction.status]">
+                        {{ transaction.status }}
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          
+          <!-- Tax Information -->
+          <div class="billing-card tax-info">
+            <div class="card-header">
+              <h3>Tax Information</h3>
+            </div>
+            <div class="tax-content">
+              <div class="tax-status">
+                <div class="status-icon">✅</div>
+                <div class="status-text">
+                  <h4>No Tax Charged</h4>
+                  <p>This platform does not charge any taxes on transactions. You are responsible for reporting and paying taxes according to your local regulations.</p>
+                </div>
               </div>
-              <p class="card-description">Tax information not provided</p>
+              <div class="tax-notice">
+                <p><strong>Important:</strong> As an independent service provider, you may be required to:</p>
+                <ul>
+                  <li>Keep records of all your earnings</li>
+                  <li>Report income to your local tax authority</li>
+                  <li>Pay applicable taxes based on your jurisdiction</li>
+                </ul>
+                <p class="disclaimer">Please consult with a tax professional for guidance specific to your situation.</p>
+              </div>
             </div>
           </div>
         </div>
@@ -1075,7 +1196,6 @@ const sendVerificationEmail = async () => {
 .settings-page {
   min-height: 100vh;
   background: var(--color-background);
-  padding-top: 70px;
 }
 
 /* Header */
@@ -1545,6 +1665,153 @@ const sendVerificationEmail = async () => {
   }
 }
 
+/* Billing Section */
+.billing-section {
+  margin-bottom: var(--spacing-xl);
+}
+
+.billing-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-lg);
+  
+  h3 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--color-text-dark);
+  }
+}
+
+.billing-filters {
+  .filter-select {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 1px solid var(--color-text-lighter);
+    border-radius: var(--border-radius-md);
+    background: white;
+    color: var(--color-text-dark);
+    cursor: pointer;
+    
+    &:focus {
+      outline: none;
+      border-color: var(--color-accent);
+    }
+  }
+}
+
+.empty-state {
+  text-align: center;
+  padding: var(--spacing-xl) 0;
+  
+  .empty-icon {
+    font-size: 3rem;
+    margin-bottom: var(--spacing-md);
+    opacity: 0.5;
+  }
+  
+  h4 {
+    font-size: 1.2rem;
+    color: var(--color-text-dark);
+    margin-bottom: var(--spacing-sm);
+  }
+  
+  p {
+    color: var(--color-text-light);
+  }
+}
+
+.billing-table {
+  overflow-x: auto;
+  
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    
+    th {
+      text-align: left;
+      padding: var(--spacing-md);
+      border-bottom: 2px solid var(--color-text-lighter);
+      color: var(--color-text-dark);
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    
+    td {
+      padding: var(--spacing-md);
+      border-bottom: 1px solid var(--color-text-lighter);
+      
+      &.amount-positive {
+        color: #10b981;
+        font-weight: 500;
+      }
+      
+      &.amount-negative {
+        color: #ef4444;
+        font-weight: 500;
+      }
+    }
+    
+    tr:hover {
+      background-color: var(--color-background-alt);
+    }
+  }
+}
+
+.transaction-type {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  
+  &.subscription {
+    background-color: #dbeafe;
+    color: #1e40af;
+  }
+  
+  &.tokens {
+    background-color: #e0e7ff;
+    color: #3730a3;
+  }
+  
+  &.gifts {
+    background-color: #fce7f3;
+    color: #be185d;
+  }
+  
+  &.withdrawal {
+    background-color: #fee2e2;
+    color: #dc2626;
+  }
+  
+  &.refund {
+    background-color: #fed7aa;
+    color: #c2410c;
+  }
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  
+  &.completed {
+    background-color: #d1fae5;
+    color: #065f46;
+  }
+  
+  &.pending {
+    background-color: #fef3c7;
+    color: #92400e;
+  }
+  
+  &.failed {
+    background-color: #fee2e2;
+    color: #dc2626;
+  }
+}
+
 /* Billing Cards */
 .billing-cards {
   display: grid;
@@ -1556,6 +1823,67 @@ const sendVerificationEmail = async () => {
   border: 1px solid var(--color-text-lighter);
   border-radius: var(--border-radius-lg);
   padding: var(--spacing-lg);
+  
+  &.tax-info {
+    .tax-content {
+      .tax-status {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--spacing-md);
+        margin-bottom: var(--spacing-lg);
+        
+        .status-icon {
+          font-size: 2rem;
+          flex-shrink: 0;
+        }
+        
+        .status-text {
+          h4 {
+            font-size: 1.2rem;
+            color: #10b981;
+            margin-bottom: var(--spacing-sm);
+          }
+          
+          p {
+            color: var(--color-text-light);
+            line-height: 1.6;
+          }
+        }
+      }
+      
+      .tax-notice {
+        background: #f3f4f6;
+        border-radius: var(--border-radius-md);
+        padding: var(--spacing-md);
+        
+        p {
+          margin-bottom: var(--spacing-sm);
+          color: var(--color-text-dark);
+          
+          &:last-child {
+            margin-bottom: 0;
+          }
+        }
+        
+        ul {
+          margin: var(--spacing-sm) 0;
+          padding-left: var(--spacing-lg);
+          
+          li {
+            margin-bottom: var(--spacing-xs);
+            color: var(--color-text-dark);
+          }
+        }
+        
+        .disclaimer {
+          font-style: italic;
+          color: var(--color-text-light);
+          font-size: 0.875rem;
+          margin-top: var(--spacing-sm);
+        }
+      }
+    }
+  }
   
   .card-header {
     display: flex;

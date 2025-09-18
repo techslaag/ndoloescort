@@ -512,8 +512,14 @@ const saveAsDraft = async () => {
       console.log('Created profile:', profile)
       console.log('Draft profile ID set to:', draftProfileId.value)
       
-      // Increment subscription usage for new profile
-      await subscriptionStore.incrementProfileUsage()
+      // Try to increment subscription usage for new profile
+      try {
+        await subscriptionStore.incrementProfileUsage()
+      } catch (usageError) {
+        console.error('Error incrementing profile usage:', usageError)
+        // Don't fail the entire save operation if usage tracking fails
+        // The profile was already created successfully
+      }
     }
     
     // Save services if any
@@ -1144,8 +1150,8 @@ const getFileType = (mimeType: string): string => {
       
       <!-- Step 5: Media & Files -->
       <div v-if="currentStep === 5" class="form-section">
-        <h2>Photos, Videos & Documents</h2>
-        <p class="section-description">Upload media files and documents to showcase your services</p>
+        <h2>Photos, Videos</h2>
+        <p class="section-description">Upload media files to showcase your services</p>
         
         <div class="uploaded-media" v-if="uploadedFiles.length > 0">
           <div v-for="(file, index) in uploadedFiles" :key="index" class="media-item">
@@ -1197,7 +1203,7 @@ const getFileType = (mimeType: string): string => {
             />
             <div class="upload-icon">📎</div>
             <p>Click to upload files</p>
-            <span>Images, videos, documents up to 5MB each</span>
+            <span>Images, videos up to 5MB each</span>
           </label>
         </div>
       </div>

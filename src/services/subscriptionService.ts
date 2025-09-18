@@ -35,23 +35,31 @@ class SubscriptionService {
       )
 
       if (response.documents.length === 0) {
-        // User has no subscription, create a free tier subscription
-        const freeTierSubscription = await this.createFreeSubscription(userId)
-        return freeTierSubscription
+        // Check if user has any subscription at all (including cancelled)
+        const allSubscriptions = await databases.listDocuments(
+          DATABASE_ID,
+          SUBSCRIPTIONS_COLLECTION_ID,
+          [
+            Query.equal('userId', userId)
+          ]
+        )
+        
+        if (allSubscriptions.documents.length === 0) {
+          // User has never had a subscription, create a free tier subscription
+          const freeTierSubscription = await this.createFreeSubscription(userId)
+          return freeTierSubscription
+        } else {
+          // User had a subscription but it's not active
+          return null
+        }
       }
 
       const doc = response.documents[0]
       return this.mapDocumentToSubscription(doc)
     } catch (error) {
       console.error('Error fetching user subscription:', error)
-      // If there's an error, try to create a free subscription as fallback
-      try {
-        const freeTierSubscription = await this.createFreeSubscription(userId)
-        return freeTierSubscription
-      } catch (createError) {
-        console.error('Error creating free subscription:', createError)
-        return null
-      }
+      // Don't automatically create subscription on error
+      return null
     }
   }
 
@@ -372,7 +380,7 @@ class SubscriptionService {
       await databases.updateDocument(
         DATABASE_ID,
         SUBSCRIPTION_USAGE_COLLECTION_ID,
-        usage.subscriptionId,
+        usage.id!, // Use the document ID instead of subscriptionId
         {
           profilesCreated: usage.profilesCreated + 1,
           profilesRemaining: plan.features.profilesPerMonth - (usage.profilesCreated + 1),
@@ -531,6 +539,7 @@ class SubscriptionService {
 
   private mapDocumentToUsage(doc: any): SubscriptionUsage {
     return {
+      id: doc.$id, // Add document ID
       userId: doc.userId,
       subscriptionId: doc.subscriptionId,
       period: doc.period,

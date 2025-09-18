@@ -87,9 +87,6 @@ const navigateToEscorts = (city: string) => {
 </template>
 
 <style scoped lang="scss">
-.locations-page {
-  padding-top: 70px;
-}
 
 .page-header {
   background-color: var(--color-primary-dark);

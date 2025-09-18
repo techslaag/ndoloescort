@@ -214,8 +214,20 @@ export const useSubscriptionStore = defineStore('subscription', () => {
   const incrementProfileUsage = async (): Promise<boolean> => {
     try {
       const authStore = useAuthStore()
-      if (!authStore.user || !currentSubscription.value) {
-        throw new Error('No active subscription')
+      if (!authStore.user) {
+        throw new Error('User not authenticated')
+      }
+      
+      // If no subscription exists, try to create a free tier subscription
+      if (!currentSubscription.value) {
+        console.log('No subscription found, attempting to create free tier subscription')
+        await loadUserSubscription()
+        
+        // If still no subscription after loading, we can't proceed
+        if (!currentSubscription.value) {
+          console.error('Unable to create or load subscription')
+          return false
+        }
       }
 
       await subscriptionService.incrementProfileUsage(
@@ -234,7 +246,8 @@ export const useSubscriptionStore = defineStore('subscription', () => {
     } catch (err: any) {
       console.error('Error incrementing profile usage:', err)
       error.value = err.message || 'Failed to update usage'
-      throw err
+      // Don't throw the error, just return false
+      return false
     }
   }
 
