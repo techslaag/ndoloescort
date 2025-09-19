@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { useProfileStore } from '../../stores/profile'
 import { useNotificationStore } from '../../stores/notification'
+import { formatCurrency } from '../../utils/currency'
 import ErrorAlert from '../../components/ErrorAlert.vue'
 
 const router = useRouter()
@@ -128,7 +129,7 @@ const loadDashboardData = async () => {
       {
         id: '4',
         type: 'payment',
-        message: 'Payment of $500 received',
+        message: `Payment of ${formatCurrency(500)} received`,
         timestamp: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
         amount: 500
       }
@@ -423,19 +424,19 @@ const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') =>
           <div class="earnings-grid">
             <div class="earning-card">
               <div class="earning-label">Today</div>
-              <div class="earning-value">${{ earnings.today }}</div>
+              <div class="earning-value">{{ formatCurrency(earnings.today) }}</div>
             </div>
             <div class="earning-card">
               <div class="earning-label">This Week</div>
-              <div class="earning-value">${{ earnings.thisWeek }}</div>
+              <div class="earning-value">{{ formatCurrency(earnings.thisWeek) }}</div>
             </div>
             <div class="earning-card">
               <div class="earning-label">This Month</div>
-              <div class="earning-value">${{ earnings.thisMonth }}</div>
+              <div class="earning-value">{{ formatCurrency(earnings.thisMonth) }}</div>
             </div>
             <div class="earning-card pending">
               <div class="earning-label">Pending</div>
-              <div class="earning-value">${{ earnings.pending }}</div>
+              <div class="earning-value">{{ formatCurrency(earnings.pending) }}</div>
             </div>
           </div>
         </div>

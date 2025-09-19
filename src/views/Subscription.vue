@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useSubscriptionStore } from '../stores/subscription'
 import { useAuthStore } from '../stores/auth'
 import { SUBSCRIPTION_PLANS, type SubscriptionPlan, type BillingPeriod } from '../types/subscription'
+import { formatCurrency, getCurrencySymbol } from '../utils/currency'
 import FlutterwavePayment from '../components/payment/FlutterwavePayment.vue'
 import ErrorAlert from '../components/ErrorAlert.vue'
 import { flutterwaveService } from '../services/flutterwaveService'
@@ -302,13 +303,13 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
             <div class="summary-card">
               <h3>{{ selectedPlan.name }} Plan</h3>
               <div class="price-display">
-                <span class="currency">$</span>
+                <span class="currency">{{ getCurrencySymbol() }}</span>
                 <span class="amount">{{ getPrice(selectedPlan) }}</span>
                 <span class="period">/{{ selectedBillingPeriod === 'monthly' ? 'month' : 'year' }}</span>
               </div>
               
               <div v-if="selectedBillingPeriod === 'yearly' && getSavings(selectedPlan) > 0" class="savings-info">
-                Save ${{ getSavings(selectedPlan) }} per year
+                Save {{ formatCurrency(getSavings(selectedPlan)) }} per year
               </div>
               
               <div class="features-summary">
@@ -367,17 +368,17 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
           
           <div class="plan-pricing">
             <div class="price-main">
-              <span class="currency">$</span>
+              <span class="currency">{{ getCurrencySymbol() }}</span>
               <span class="amount">{{ getPrice(plan) }}</span>
               <span class="period">/{{ selectedBillingPeriod === 'monthly' ? 'mo' : 'yr' }}</span>
             </div>
             
             <div v-if="selectedBillingPeriod === 'yearly' && plan.monthlyPrice > 0" class="price-comparison">
-              ${{ getMonthlyEquivalent(plan).toFixed(2) }}/month
+              {{ formatCurrency(getMonthlyEquivalent(plan)) }}/month
             </div>
             
             <div v-if="selectedBillingPeriod === 'yearly' && getSavings(plan) > 0" class="savings-badge">
-              Save ${{ getSavings(plan) }}
+              Save {{ formatCurrency(getSavings(plan)) }}
             </div>
           </div>
           
@@ -564,7 +565,7 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
           </div>
           <div class="detail-row">
             <span class="label">New price:</span>
-            <span class="value">${{ upgradePlan ? getPrice(upgradePlan) : 0 }}/{{ selectedBillingPeriod }}</span>
+            <span class="value">{{ formatCurrency(upgradePlan ? getPrice(upgradePlan) : 0) }}/{{ selectedBillingPeriod }}</span>
           </div>
           <div class="detail-row">
             <span class="label">Billing:</span>

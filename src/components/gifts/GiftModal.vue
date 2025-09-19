@@ -4,6 +4,7 @@ import { useAuthStore } from '../../stores/auth'
 import { useSubscriptionStore } from '../../stores/subscription'
 import { featureAccessService } from '../../services/featureAccessService'
 import { flutterwaveService } from '../../services/flutterwaveService'
+import { formatCurrency } from '../../utils/currency'
 import FlutterwavePayment from '../payment/FlutterwavePayment.vue'
 
 interface Gift {
@@ -150,7 +151,7 @@ onMounted(() => {
           >
             <div class="gift-icon">{{ gift.icon }}</div>
             <div class="gift-name">{{ gift.name }}</div>
-            <div class="gift-price">${{ gift.price }}</div>
+            <div class="gift-price">{{ formatCurrency(gift.price) }}</div>
           </div>
         </div>
 
@@ -159,11 +160,11 @@ onMounted(() => {
           <div class="gift-preview">
             <span class="icon">{{ selectedGift.icon }}</span>
             <span class="name">{{ selectedGift.name }}</span>
-            <span class="price">${{ selectedGift.price }}</span>
+            <span class="price">{{ formatCurrency(selectedGift.price) }}</span>
           </div>
           <!-- Price info -->
           <div class="price-info">
-            You will be charged <strong>${{ selectedGift.price }}</strong> for this gift
+            You will be charged <strong>{{ formatCurrency(selectedGift.price) }}</strong> for this gift
           </div>
         </div>
 

@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch, onBeforeUnmount
 import { useRouter } from 'vue-router'
 import { useMessagingStore, AUTO_DELETE_PERIODS, type Message, type AutoDeletePeriod } from '../../stores/messaging'
 import { useAuthStore } from '../../stores/auth'
+import { useToast } from '../../composables/useToast'
 import { realtimeService } from '../../services/realtimeService'
 import { storage, MEDIA_BUCKET_ID } from '../../lib/appwrite'
 import { ID } from 'appwrite'
@@ -26,6 +27,7 @@ const emit = defineEmits<{
 const router = useRouter()
 const messagingStore = useMessagingStore()
 const authStore = useAuthStore()
+const { error: showError } = useToast()
 
 // Computed properties for user presence
 const isReceiverOnline = computed(() => messagingStore.isUserOnline(props.receiverId))
@@ -109,7 +111,7 @@ const handleSendMessage = async (content: string, type: Message['type'] = 'text'
     scrollToBottom()
   } else if (messagingStore.error) {
     // Show error to user
-    alert(messagingStore.error)
+    showError(messagingStore.error)
   }
 }
 
@@ -177,7 +179,7 @@ const startRecording = async () => {
     }, 1000)
   } catch (err) {
     console.error('Failed to start recording:', err)
-    alert('Could not access microphone. Please check permissions.')
+    showError('Could not access microphone. Please check permissions.')
   }
 }
 
@@ -255,7 +257,7 @@ const sendVoiceMessage = async (audioBlob: Blob) => {
     )
   } catch (error) {
     console.error('Voice message upload failed:', error)
-    alert('Failed to send voice message. Please try again.')
+    showError('Failed to send voice message. Please try again.')
   } finally {
     messagingStore.isLoading = false
   }
@@ -327,7 +329,7 @@ const handleFileSelect = async (event: Event) => {
       }
     } catch (error) {
       console.error('File upload failed:', error)
-      alert('Failed to upload file. Please try again.')
+      showError('Failed to upload file. Please try again.')
     } finally {
       messagingStore.isLoading = false
     }

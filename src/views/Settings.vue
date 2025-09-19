@@ -3,6 +3,7 @@ import { ref, computed, onMounted, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useToast } from '../composables/useToast'
+import { formatCurrency as formatCurrencyUtil } from '../utils/currency'
 import ErrorAlert from '../components/ErrorAlert.vue'
 
 const router = useRouter()
@@ -160,18 +161,8 @@ const formatDate = (dateString: string) => {
   })
 }
 
-const formatCurrency = (amount: number, currency: string = 'USD') => {
-  const symbol = {
-    USD: '$',
-    EUR: '€',
-    GBP: '£',
-    CAD: 'C$',
-    XAF: 'XAF ',
-    XOF: 'XOF '
-  }[currency] || currency + ' '
-  
-  const formattedAmount = Math.abs(amount).toFixed(2)
-  return `${amount < 0 ? '-' : ''}${symbol}${formattedAmount}`
+const formatCurrency = (amount: number, currency?: string) => {
+  return formatCurrencyUtil(amount, currency)
 }
 
 const formatTransactionType = (type: string) => {

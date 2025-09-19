@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { flutterwaveService, type FlutterwaveConfig, type FlutterwaveResponse } from '../../services/flutterwaveService'
 import { useAuthStore } from '../../stores/auth'
+import { getUserCurrency } from '../../utils/currency'
 import type { PaymentIntent } from '../../services/paymentService'
 
 interface Props {
@@ -17,7 +18,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  currency: 'USD'
+  currency: getUserCurrency()
 })
 
 const emit = defineEmits<{

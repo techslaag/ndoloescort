@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useAuthStore } from '../../stores/auth'
+import { useToast } from '../../composables/useToast'
 import { flutterwaveService } from '../../services/flutterwaveService'
+import { formatCurrency } from '../../utils/currency'
 import type { Transaction } from '../../services/paymentService'
 
 interface Props {
@@ -15,6 +17,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const authStore = useAuthStore()
+const { error: showError } = useToast()
 
 // State
 const transactions = ref<Transaction[]>([])
@@ -131,10 +134,7 @@ const formatDate = (dateString: string) => {
 }
 
 const formatAmount = (amount: number) => {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD'
-  }).format(amount)
+  return formatCurrency(amount)
 }
 
 const viewReceipt = (transaction: Transaction) => {
@@ -150,7 +150,7 @@ const requestRefund = async (transaction: Transaction) => {
       await loadTransactions()
     } catch (err: any) {
       console.error('Error processing refund:', err)
-      alert('Failed to process refund. Please contact support.')
+      showError('Failed to process refund. Please contact support.')
     }
   }
 }

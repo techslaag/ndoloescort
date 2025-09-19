@@ -3,6 +3,7 @@ import { defineProps, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { useMessagingStore } from '../../stores/messaging'
+import { useToast } from '../../composables/useToast'
 
 interface Props {
   receiverId: string
@@ -25,6 +26,7 @@ const props = withDefaults(defineProps<Props>(), {
 const router = useRouter()
 const authStore = useAuthStore()
 const messagingStore = useMessagingStore()
+const { error: showError } = useToast()
 
 const canMessage = computed(() => {
   if (!authStore.user || props.disabled) return false
@@ -61,7 +63,7 @@ const handleStartMessage = () => {
   
   if (!canMessage.value) {
     const restrictions = messagingStore.getConversationRestrictions()
-    alert(`You cannot initiate conversations with ${props.receiverRole}s. ${restrictions.description}`)
+    showError(`You cannot initiate conversations with ${props.receiverRole}s. ${restrictions.description}`)
     return
   }
   

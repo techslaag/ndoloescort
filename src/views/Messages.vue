@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessagingStore } from '../stores/messaging'
 import { useAuthStore } from '../stores/auth'
+import { useToast } from '../composables/useToast'
 import ConversationList from '../components/messaging/ConversationList.vue'
 import MessageThread from '../components/messaging/MessageThread.vue'
 
@@ -10,6 +11,7 @@ const route = useRoute()
 const router = useRouter()
 const messagingStore = useMessagingStore()
 const authStore = useAuthStore()
+const { error: showError } = useToast()
 
 const selectedConversationId = ref<string | null>(null)
 const selectedReceiverId = ref<string | null>(null)
@@ -75,7 +77,7 @@ const startNewConversation = async (receiverId: string, receiverName?: string, r
   if (!messagingStore.canMessageUser(receiverId, targetRole)) {
     const restrictions = messagingStore.getConversationRestrictions()
     const description = 'description' in restrictions ? restrictions.description : 'You do not have permission.'
-    alert(`You cannot initiate conversations with ${targetRole}s. ${description}`)
+    showError(`You cannot initiate conversations with ${targetRole}s. ${description}`)
     return
   }
   
@@ -90,7 +92,7 @@ const startNewConversation = async (receiverId: string, receiverName?: string, r
       targetRole
     )
   } else if (messagingStore.error) {
-    alert(messagingStore.error)
+    showError(messagingStore.error)
   }
 }
 

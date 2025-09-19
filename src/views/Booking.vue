@@ -5,6 +5,7 @@ import { useAuthStore } from '../stores/auth'
 import { useProfileStore } from '../stores/profile'
 import { paymentService } from '../services/paymentService'
 import { flutterwaveService } from '../services/flutterwaveService'
+import { formatCurrency } from '../utils/currency'
 import FlutterwavePayment from '../components/payment/FlutterwavePayment.vue'
 import ErrorAlert from '../components/ErrorAlert.vue'
 
@@ -252,7 +253,7 @@ const bookAnother = () => {
             </div>
             <div class="summary-item">
               <span class="label">Total Cost:</span>
-              <span class="value">${{ totalCost }}</span>
+              <span class="value">{{ formatCurrency(totalCost) }}</span>
             </div>
           </div>
           
@@ -323,7 +324,7 @@ const bookAnother = () => {
               <div class="cost-breakdown">
                 <div class="cost-item">
                   <span class="label">Hourly Rate:</span>
-                  <span class="value">${{ selectedPricing?.amount }}</span>
+                  <span class="value">{{ formatCurrency(selectedPricing?.amount || 0) }}</span>
                 </div>
                 <div class="cost-item">
                   <span class="label">Duration:</span>
@@ -331,11 +332,11 @@ const bookAnother = () => {
                 </div>
                 <div class="cost-item subtotal">
                   <span class="label">Subtotal:</span>
-                  <span class="value">${{ totalCost }}</span>
+                  <span class="value">{{ formatCurrency(totalCost) }}</span>
                 </div>
                 <div class="cost-item total">
                   <span class="label">Total:</span>
-                  <span class="value">${{ totalCost }}</span>
+                  <span class="value">{{ formatCurrency(totalCost) }}</span>
                 </div>
               </div>
             </div>
@@ -394,7 +395,7 @@ const bookAnother = () => {
                 <div v-if="pricing.length > 0" class="pricing-list">
                   <div v-for="price in pricing" :key="price.type" class="pricing-item">
                     <span class="price-type">{{ price.type }}:</span>
-                    <span class="price-amount">${{ price.amount }}</span>
+                    <span class="price-amount">{{ formatCurrency(price.amount) }}</span>
                   </div>
                 </div>
               </div>
@@ -502,7 +503,7 @@ const bookAnother = () => {
               <div class="cost-summary">
                 <div class="cost-item">
                   <span>Hourly Rate:</span>
-                  <span>${{ selectedPricing?.amount || 0 }}</span>
+                  <span>{{ formatCurrency(selectedPricing?.amount || 0) }}</span>
                 </div>
                 <div class="cost-item">
                   <span>Duration:</span>
@@ -510,7 +511,7 @@ const bookAnother = () => {
                 </div>
                 <div class="cost-item total">
                   <span>Total Cost:</span>
-                  <span>${{ totalCost }}</span>
+                  <span>{{ formatCurrency(totalCost) }}</span>
                 </div>
               </div>
               

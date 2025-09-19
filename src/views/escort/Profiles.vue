@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { useProfileStore } from '../../stores/profile'
 import { useMessagingStore } from '../../stores/messaging'
+import { useToast } from '../../composables/useToast'
 import ErrorAlert from '../../components/ErrorAlert.vue'
 import ProfileVerificationButton from '../../components/escort/ProfileVerificationButton.vue'
 import DeleteProfileModal from '../../components/modals/DeleteProfileModal.vue'
@@ -12,6 +13,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 const profileStore = useProfileStore()
 const messagingStore = useMessagingStore()
+const { success, error: showError } = useToast()
 
 // Delete modal state
 const showDeleteModal = ref(false)
@@ -50,6 +52,63 @@ const getUnreadCountForProfile = (profileId: string) => {
   return unreadCount
 }
 
+const getProfileCompletion = (profile: any) => {
+  let completedSteps = 0
+  const totalSteps = 5
+  
+  // Step 1: Basic Information (name, age, location, description)
+  const basicInfoComplete = {
+    name: !!profile.name && profile.name.trim().length >= 2,
+    age: !!profile.age && profile.age >= 18,
+    location: !!(profile.locationCity || profile.location?.city) && 
+              !!(profile.locationCountry || profile.location?.country),
+    description: !!profile.description && profile.description.trim().length >= 50
+  }
+  const basicComplete = Object.values(basicInfoComplete).every(v => v)
+  if (basicComplete) completedSteps++
+  
+  // Step 2: Services (at least one service with description)
+  const hasServices = profile.services && profile.services.length > 0
+  const servicesComplete = hasServices && profile.services.every((s: any) => 
+    s.name && s.description && s.description.length >= 20
+  )
+  if (servicesComplete) completedSteps++
+  
+  // Step 3: Pricing (at least one valid pricing option)
+  const hasPricing = profile.pricing && profile.pricing.length > 0
+  const pricingComplete = hasPricing && profile.pricing.some((p: any) => 
+    p.amount && p.amount > 0 && p.type
+  )
+  if (pricingComplete) completedSteps++
+  
+  // Step 4: Availability (at least one working day)
+  let availabilityComplete = false
+  if (profile.availability?.workingHours) {
+    const workingHours = profile.availability.workingHours
+    availabilityComplete = Object.values(workingHours).some((day: any) => day.enabled)
+  } else if (profile.workingHours) {
+    // Handle flat structure
+    try {
+      const workingHours = typeof profile.workingHours === 'string' 
+        ? JSON.parse(profile.workingHours) 
+        : profile.workingHours
+      availabilityComplete = Object.values(workingHours).some((day: any) => day.enabled)
+    } catch (e) {
+      availabilityComplete = false
+    }
+  }
+  if (availabilityComplete) completedSteps++
+  
+  // Step 5: Media (at least one photo)
+  const hasMedia = profile.media && profile.media.length > 0
+  const hasPhotos = hasMedia && profile.media.some((m: any) => 
+    m.type === 'photo' || m.mediaType === 'photo' || (m.url && !m.url.includes('.mp4'))
+  )
+  if (hasPhotos) completedSteps++
+  
+  return Math.round((completedSteps / totalSteps) * 100)
+}
+
 onMounted(() => {
   if (!authStore.isAuthenticated) {
     router.push('/login')
@@ -84,18 +143,50 @@ const editProfile = (profileId: string) => {
 const toggleProfileStatus = async (profile: any) => {
   try {
     const profileId = profile.$id || profile.id
-    const newStatus = profile.status === 'active' ? 'paused' : 'active'
+    
+    // Check if profile is complete before activating from draft
+    if (profile.status === 'draft') {
+      const completion = getProfileCompletion(profile)
+      if (completion < 100) {
+        profileStore.setError('Profile must be 100% complete before activation. Current completion: ' + completion + '%')
+        return
+      }
+    }
+    
+    // Determine new status
+    let newStatus = 'active'
+    if (profile.status === 'active') {
+      newStatus = 'paused'
+    } else if (profile.status === 'paused') {
+      newStatus = 'active'
+    } else if (profile.status === 'draft') {
+      newStatus = 'active'
+    }
+    
     await profileStore.updateProfile(profileId, { status: newStatus })
   } catch (error) {
     console.error('Error updating profile status:', error)
+    profileStore.setError('Failed to update profile status')
   }
 }
 
 const viewAnalytics = (profileId: string) => {
+  // This is just a safety check since the button should be disabled
+  const profile = profileStore.profiles.find(p => ((p as any).$id || p.id) === profileId)
+  if (profile && profile.status !== 'active') {
+    profileStore.setError('Analytics are only available for active profiles')
+    return
+  }
   router.push(`/escort/profiles/${profileId}/analytics`)
 }
 
 const openChat = (profile: any) => {
+  // Safety check since the button should be disabled
+  if (profile.status !== 'active') {
+    profileStore.setError('Chat is only available for active profiles')
+    return
+  }
+  
   const profileId = profile.$id || profile.id
   const profileName = profile.name
   
@@ -158,8 +249,7 @@ const confirmDeleteProfile = async () => {
     
     // Show success message
     if (result?.message) {
-      // You could replace this with a toast notification
-      alert(result.message)
+      success(result.message)
     }
     
     console.log('Success! Not reloading profiles - they should be updated automatically')
@@ -179,10 +269,11 @@ const confirmDeleteProfile = async () => {
       stack: error.stack
     })
     // Show error to user
-    profileStore.setError(`Failed to delete profile: ${error.message || 'Unknown error'}`)
+    const errorMessage = `Failed to delete profile: ${error.message || 'Unknown error'}`
+    profileStore.setError(errorMessage)
     
-    // Also show an alert for immediate feedback
-    alert(`Failed to delete profile: ${error.message || 'Unknown error'}`)
+    // Also show toast for immediate feedback
+    showError(errorMessage)
   } finally {
     isDeletingProfile.value = false
     console.log('=== confirmDeleteProfile END ===')
@@ -212,7 +303,10 @@ const closeDeleteModal = () => {
     <div class="profiles-header">
       <h1>My Profiles</h1>
       <button @click="createNewProfile" class="btn btn-primary">
-        Create New Profile
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+        <span>Create New Profile</span>
       </button>
     </div>
     
@@ -224,7 +318,10 @@ const closeDeleteModal = () => {
       <h3>No profiles yet</h3>
       <p>Create your first escort profile to start receiving bookings</p>
       <button @click="createNewProfile" class="btn btn-primary">
-        Create Your First Profile
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+        </svg>
+        <span>Create Your First Profile</span>
       </button>
     </div>
     
@@ -236,7 +333,8 @@ const closeDeleteModal = () => {
         :class="{ 
           'has-image': (profile as any).media && (profile as any).media.length > 0,
           'is-active': profile.status === 'active',
-          'is-verified': profile.verification?.isVerified
+          'is-verified': profile.verification?.isVerified,
+          'is-draft': profile.status === 'draft'
         }"
       >
         <!-- Card Background -->
@@ -275,27 +373,26 @@ const closeDeleteModal = () => {
             </div>
           </div>
           
-          <!-- Profile Stats -->
-          <div class="profile-stats">
-            <div class="stat-item">
-              <span class="stat-value">{{ (profile as any).statsViews || 0 }}</span>
-              <span class="stat-label">Views</span>
+          <!-- Profile Completion -->
+          <div class="profile-completion">
+            <div class="completion-header">
+              <span class="completion-label">Profile Completion</span>
+              <span class="completion-percentage">{{ getProfileCompletion(profile) }}%</span>
             </div>
-            <div class="stat-item">
-              <span class="stat-value">{{ (profile as any).statsBookings || 0 }}</span>
-              <span class="stat-label">Bookings</span>
-            </div>
-            <div class="stat-item">
-              <span class="stat-value">{{ (profile as any).statsRating || 0 }}⭐</span>
-              <span class="stat-label">Rating</span>
+            <div class="completion-bar">
+              <div class="completion-progress" :style="{ width: `${getProfileCompletion(profile)}%` }"></div>
             </div>
           </div>
           
-          
           <!-- Quick Actions -->
           <div class="quick-actions">
-            <button @click="viewAnalytics((profile as any).$id || (profile as any).id)" class="action-btn primary">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <button 
+              @click="viewAnalytics((profile as any).$id || (profile as any).id)" 
+              class="action-btn"
+              :disabled="profile.status !== 'active'"
+              :title="profile.status !== 'active' ? 'Analytics only available for active profiles' : 'View profile analytics'"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z"/>
               </svg>
               Analytics
@@ -306,7 +403,12 @@ const closeDeleteModal = () => {
               </svg>
               Edit
             </button>
-            <button @click="openChat(profile)" class="action-btn" :class="{ 'has-unread': getUnreadCountForProfile((profile as any).$id || (profile as any).id) > 0 }">
+            <button 
+              @click="openChat(profile)" 
+              class="action-btn"
+              :disabled="profile.status !== 'active'"
+              :title="profile.status !== 'active' ? 'Chat only available for active profiles' : 'Open chat'"
+            >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/>
               </svg>
@@ -320,14 +422,21 @@ const closeDeleteModal = () => {
         <!-- Card Footer -->
         <div class="profile-footer">
           <div class="footer-actions">
-            <button @click="toggleProfileStatus(profile)" class="toggle-status-btn" :class="profile.status">
-              <svg v-if="profile.status === 'active'" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <button 
+              @click="toggleProfileStatus(profile)" 
+              class="action-btn"
+              :disabled="profile.status === 'draft' && getProfileCompletion(profile) < 100"
+              :title="profile.status === 'draft' && getProfileCompletion(profile) < 100 ? `Profile is ${getProfileCompletion(profile)}% complete. Complete all fields to activate.` : ''"
+            >
+              <svg v-if="profile.status === 'active'" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM10 17l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
               </svg>
-              <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
               </svg>
-              {{ profile.status === 'active' ? 'Active' : 'Activate' }}
+              <template v-if="profile.status === 'active'">Desactivate</template>
+              <template v-else-if="profile.status === 'paused'">Activate</template>
+              <template v-else>Activate</template>
             </button>
             
             <ProfileVerificationButton 
@@ -336,10 +445,10 @@ const closeDeleteModal = () => {
             
             <button 
               @click="showDeleteConfirmation(profile)" 
-              class="delete-btn"
+              class="action-btn"
               title="Delete this profile"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
               </svg>
             </button>
@@ -408,6 +517,47 @@ const closeDeleteModal = () => {
   }
 }
 
+.btn {
+  padding: 12px 24px;
+  border: none;
+  border-radius: var(--border-radius-md);
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  
+  @media (max-width: 768px) {
+    width: 100%;
+    padding: 10px 20px;
+    font-size: 0.95rem;
+    min-height: 44px;
+    justify-content: center;
+  }
+  
+  &.btn-primary {
+    background-color: var(--color-accent);
+    color: white;
+    
+    &:hover:not(:disabled) {
+      background-color: var(--color-accent-dark);
+      transform: translateY(-1px);
+    }
+  }
+  
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  
+  svg {
+    flex-shrink: 0;
+  }
+}
+
 .loading {
   text-align: center;
   padding: var(--spacing-xxl);
@@ -464,7 +614,6 @@ const closeDeleteModal = () => {
   min-height: 420px;
   display: flex;
   flex-direction: column;
-  cursor: pointer;
   
   &.is-active {
     box-shadow: 0 0 0 2px #10b981;
@@ -483,24 +632,22 @@ const closeDeleteModal = () => {
     }
   }
   
-  &:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12);
+  &.is-draft {
+    position: relative;
     
-    .card-background {
-      &::after {
-        content: '';
-        position: absolute;
-        inset: 0;
-        background: rgba(0,0,0,0.1);
-        transition: all 0.3s ease;
-      }
-    }
-    
-    .quick-actions {
-      transform: translateY(-2px);
+    &::before {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      background: linear-gradient(45deg, #7c3aed, #a78bfa, #7c3aed);
+      background-size: 200% 200%;
+      border-radius: 18px;
+      z-index: -1;
+      animation: gradientShift 3s ease infinite;
+      opacity: 0.6;
     }
   }
+  
   
   .card-background {
     position: absolute;
@@ -533,6 +680,53 @@ const closeDeleteModal = () => {
     flex-direction: column;
     padding: var(--spacing-lg);
     padding-top: 160px;
+  }
+  
+  .profile-completion {
+    margin-bottom: var(--spacing-lg);
+    
+    .completion-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--spacing-xs);
+      
+      .completion-label {
+        font-size: 0.813rem;
+        color: #6b7280;
+        font-weight: 500;
+      }
+      
+      .completion-percentage {
+        font-size: 0.813rem;
+        color: #1f2937;
+        font-weight: 600;
+      }
+    }
+    
+    .completion-bar {
+      width: 100%;
+      height: 8px;
+      background: #e5e7eb;
+      border-radius: 4px;
+      overflow: hidden;
+      
+      .completion-progress {
+        height: 100%;
+        background: linear-gradient(90deg, #4f46e5, #7c3aed);
+        border-radius: 4px;
+        transition: width 0.3s ease;
+        position: relative;
+        
+        &::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(90deg, rgba(255,255,255,0.2), transparent);
+          animation: shimmer 2s infinite;
+        }
+      }
+    }
   }
   
   .profile-header {
@@ -618,36 +812,30 @@ const closeDeleteModal = () => {
             background: #ef4444;
           }
         }
-      }
-    }
-  }
-  
-  .profile-stats {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--spacing-sm);
-    padding: var(--spacing-md) 0;
-    border-top: 1px solid #f3f4f6;
-    border-bottom: 1px solid #f3f4f6;
-    margin-bottom: var(--spacing-md);
-    
-    .stat-item {
-      text-align: center;
-      
-      .stat-value {
-        display: block;
-        font-size: 1.125rem;
-        font-weight: 600;
-        color: #1f2937;
-        margin-bottom: 2px;
-      }
-      
-      .stat-label {
-        display: block;
-        font-size: 0.75rem;
-        color: #9ca3af;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
+        
+        &.draft {
+          background: linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 100%);
+          color: #7c3aed;
+          border: 1px solid #c4b5fd;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          padding: 6px 14px;
+          box-shadow: 0 2px 4px rgba(124, 58, 237, 0.1);
+          
+          .status-dot {
+            background: #7c3aed;
+            width: 8px;
+            height: 8px;
+            box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+          }
+          
+          &::after {
+            content: '✨';
+            margin-left: 4px;
+            font-size: 0.8rem;
+          }
+        }
       }
     }
   }
@@ -677,37 +865,30 @@ const closeDeleteModal = () => {
       transition: all 0.2s ease;
       position: relative;
       
-      &:hover {
+      &:hover:not(:disabled) {
         background: #f9fafb;
         color: #1f2937;
         border-color: #d1d5db;
       }
       
-      &.primary {
-        background: #4f46e5;
-        color: white;
-        border-color: #4f46e5;
-        
-        &:hover {
-          background: #4338ca;
-          border-color: #4338ca;
-        }
+      &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        background: #f9fafb;
       }
       
-      &.has-unread {
-        .unread-count {
-          position: absolute;
-          top: -4px;
-          right: -4px;
-          background: #ef4444;
-          color: white;
-          font-size: 0.7rem;
-          font-weight: 600;
-          padding: 2px 6px;
-          border-radius: 10px;
-          min-width: 18px;
-          text-align: center;
-        }
+      .unread-count {
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        background: #ef4444;
+        color: white;
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 2px 6px;
+        border-radius: 10px;
+        min-width: 18px;
+        text-align: center;
       }
       
       svg {
@@ -723,52 +904,63 @@ const closeDeleteModal = () => {
     
     .footer-actions {
       display: flex;
-      align-items: center;
-      justify-content: space-between;
       gap: var(--spacing-sm);
       
-      .toggle-status-btn {
+      .action-btn {
+        flex: 1;
         display: flex;
         align-items: center;
+        justify-content: center;
         gap: 6px;
-        padding: 6px 12px;
+        padding: 10px;
         border: 1px solid #e5e7eb;
-        border-radius: 6px;
+        border-radius: 8px;
         background: white;
         color: #6b7280;
         font-size: 0.875rem;
         font-weight: 500;
         cursor: pointer;
         transition: all 0.2s ease;
+        position: relative;
         
-        &.active {
-          border-color: #10b981;
-          color: #10b981;
+        &:hover:not(:disabled) {
+          background: #f9fafb;
+          color: #1f2937;
+          border-color: #d1d5db;
+        }
+        
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+          background: #f9fafb;
+        }
+        
+        &[title="Delete this profile"] {
+          color: #ef4444;
           
           &:hover {
-            background: #f0fdf4;
+            background: #fee2e2;
+            color: #dc2626;
+            border-color: #fecaca;
           }
         }
         
-        &:not(.active) {
-          &:hover {
-            background: #f3f4f6;
-            color: #1f2937;
-          }
+        .unread-count {
+          position: absolute;
+          top: -4px;
+          right: -4px;
+          background: #ef4444;
+          color: white;
+          font-size: 0.7rem;
+          font-weight: 600;
+          padding: 2px 6px;
+          border-radius: 10px;
+          min-width: 18px;
+          text-align: center;
         }
-      }
-      
-      .delete-btn {
-        padding: 6px;
-        border: none;
-        background: none;
-        color: #ef4444;
-        cursor: pointer;
-        border-radius: 4px;
-        transition: all 0.2s ease;
         
-        &:hover {
-          background: #fee2e2;
+        svg {
+          flex-shrink: 0;
         }
       }
     }
@@ -782,6 +974,15 @@ const closeDeleteModal = () => {
   }
   50% {
     opacity: 0.6;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
   }
 }
 
@@ -807,6 +1008,18 @@ const closeDeleteModal = () => {
   }
 }
 
+@keyframes gradientShift {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
 // Animate cards on load
 .profile-card {
   animation: fadeIn 0.4s ease-out;
@@ -819,32 +1032,6 @@ const closeDeleteModal = () => {
   }
 }
 
-.btn {
-  padding: 12px 24px;
-  border: none;
-  border-radius: var(--border-radius-md);
-  font-size: 1rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  min-height: 48px;
-  
-  @media (max-width: 768px) {
-    width: 100%;
-    padding: 10px 20px;
-    font-size: 0.95rem;
-    min-height: 44px;
-  }
-  
-  &.btn-primary {
-    background-color: var(--color-accent);
-    color: white;
-    
-    &:hover:not(:disabled) {
-      background-color: var(--color-accent-dark);
-    }
-  }
-}
 
 // Mobile Responsive Design
 @media (max-width: 768px) {
@@ -873,15 +1060,18 @@ const closeDeleteModal = () => {
       }
     }
     
-    .profile-stats {
-      .stat-item {
-        .stat-value {
-          font-size: 1rem;
+    .profile-completion {
+      margin-bottom: var(--spacing-md);
+      
+      .completion-header {
+        .completion-label,
+        .completion-percentage {
+          font-size: 0.75rem;
         }
-        
-        .stat-label {
-          font-size: 0.7rem;
-        }
+      }
+      
+      .completion-bar {
+        height: 6px;
       }
     }
     
@@ -899,9 +1089,9 @@ const closeDeleteModal = () => {
       padding: var(--spacing-sm) var(--spacing-md);
       
       .footer-actions {
-        .toggle-status-btn {
+        .action-btn {
+          padding: 8px;
           font-size: 0.8rem;
-          padding: 4px 8px;
         }
       }
     }
@@ -954,18 +1144,18 @@ const closeDeleteModal = () => {
       }
     }
     
-    .profile-stats {
-      padding: var(--spacing-sm) 0;
+    .profile-completion {
       margin-bottom: var(--spacing-sm);
       
-      .stat-item {
-        .stat-value {
-          font-size: 0.9rem;
+      .completion-header {
+        .completion-label,
+        .completion-percentage {
+          font-size: 0.7rem;
         }
-        
-        .stat-label {
-          font-size: 0.65rem;
-        }
+      }
+      
+      .completion-bar {
+        height: 6px;
       }
     }
     
@@ -983,13 +1173,6 @@ const closeDeleteModal = () => {
           height: 16px;
         }
         
-        &.has-unread {
-          .unread-count {
-            font-size: 0.65rem;
-            padding: 1px 4px;
-            min-width: 16px;
-          }
-        }
       }
     }
     
@@ -1000,26 +1183,14 @@ const closeDeleteModal = () => {
         flex-direction: column;
         gap: var(--spacing-xs);
         
-        .toggle-status-btn {
-          width: 100%;
-          justify-content: center;
-          font-size: 0.8rem;
-          padding: 6px 12px;
-          min-height: 36px;
+        .action-btn {
+          padding: 10px;
+          font-size: 0.85rem;
+          min-height: 40px;
           
           svg {
-            width: 14px;
-            height: 14px;
-          }
-        }
-        
-        .delete-btn {
-          align-self: center;
-          padding: 8px;
-          
-          svg {
-            width: 14px;
-            height: 14px;
+            width: 16px;
+            height: 16px;
           }
         }
       }

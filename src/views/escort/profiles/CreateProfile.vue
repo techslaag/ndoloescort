@@ -4,6 +4,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../../../stores/auth'
 import { useProfileStore } from '../../../stores/profile'
 import { useSubscriptionStore } from '../../../stores/subscription'
+import { useToast } from '../../../composables/useToast'
+import { getCurrencySymbol } from '../../../utils/currency'
 import ErrorAlert from '../../../components/ErrorAlert.vue'
 import LocationDropdowns from '../../../components/forms/LocationDropdownsOptimized.vue'
 import ProfileActivationModal from '../../../components/profile/ProfileActivationModal.vue'
@@ -17,6 +19,7 @@ const route = useRoute()
 const authStore = useAuthStore()
 const profileStore = useProfileStore()
 const subscriptionStore = useSubscriptionStore()
+const { success, error: showError } = useToast()
 
 // Determine if we're in edit mode
 const profileId = computed(() => route.params.id as string | undefined)
@@ -85,6 +88,50 @@ const steps = computed(() => [
   }
 ])
 
+const profileCompletion = computed(() => {
+  const completedSteps = steps.value.filter(step => step.isComplete).length
+  return Math.round((completedSteps / totalSteps) * 100)
+})
+
+const detailedCompletion = computed(() => {
+  const stepStatuses = []
+  
+  // Basic Information
+  const basicComplete = {
+    name: !!form.name && form.name.trim().length >= 2,
+    age: !!form.age && parseInt(form.age) >= 18,
+    location: !!(form.location.city && form.location.country),
+    description: !!form.description && form.description.trim().length >= 50
+  }
+  const basicPercentage = (Object.values(basicComplete).filter(v => v).length / 4) * 100
+  stepStatuses.push({ step: 'Basic Info', percentage: basicPercentage })
+  
+  // Services
+  const servicesComplete = selectedServices.value.length > 0 && 
+    selectedServices.value.every(s => serviceDescriptions.value[s] && serviceDescriptions.value[s].length >= 20)
+  stepStatuses.push({ step: 'Services', percentage: servicesComplete ? 100 : 0 })
+  
+  // Pricing
+  const pricingComplete = form.pricing.some(p => p.amount && parseFloat(p.amount) > 0)
+  stepStatuses.push({ step: 'Pricing', percentage: pricingComplete ? 100 : 0 })
+  
+  // Availability
+  const availabilityComplete = Object.values(form.workingHours).some(day => day.enabled)
+  stepStatuses.push({ step: 'Availability', percentage: availabilityComplete ? 100 : 0 })
+  
+  // Media
+  const mediaComplete = uploadedFiles.value.length > 0
+  stepStatuses.push({ step: 'Media', percentage: mediaComplete ? 100 : 0 })
+  
+  const overallPercentage = Math.round(stepStatuses.reduce((acc, s) => acc + s.percentage, 0) / 5)
+  
+  return {
+    steps: stepStatuses,
+    overall: overallPercentage,
+    canPublish: overallPercentage === 100
+  }
+})
+
 const form = reactive<ProfileFormData>({
   name: '',
   age: '',
@@ -135,6 +182,10 @@ const userRole = computed(() => {
     return (authStore.user.prefs as any).userType
   }
   return null
+})
+
+const currencySymbol = computed(() => {
+  return getCurrencySymbol()
 })
 
 const isEscort = computed(() => userRole.value === 'escort')
@@ -333,33 +384,11 @@ const goToStep = (step: number) => {
 }
 
 const hasMinimumRequirements = (): boolean => {
-  // Check Step 1: Basic Information (required)
-  if (!form.name || !form.age || !form.location.city || !form.location.country || !form.description) {
-    return false
-  }
-  
-  // Check Step 2: Services (at least one service with description)
-  if (selectedServices.value.length === 0 || 
-      !selectedServices.value.every(service => serviceDescriptions.value[service])) {
-    return false
-  }
-  
-  // Check Step 3: Pricing (at least one pricing option)
-  if (!form.pricing.some(p => p.amount && parseFloat(p.amount) > 0)) {
-    return false
-  }
-  
-  // Check Step 4: Availability (working hours configured)
-  const hasWorkingHours = Object.values(form.workingHours).some(day => day.enabled)
-  if (!hasWorkingHours) {
-    return false
-  }
-  
-  // Step 5: Media is optional
-  return true
+  // Use the detailed completion calculation
+  return detailedCompletion.value.overall >= 80 // Allow publishing at 80% completion (4 out of 5 steps)
 }
 
-const canPublish = computed(() => hasMinimumRequirements())
+const canPublish = computed(() => detailedCompletion.value.canPublish)
 
 const toggleService = (serviceValue: string) => {
   const index = selectedServices.value.indexOf(serviceValue)
@@ -414,7 +443,7 @@ const handleFileUpload = (event: Event) => {
       uploadedFiles.value.push({
         file,
         preview: e.target?.result as string,
-        blur: file.type.startsWith('image/') // Only images can be blurred
+        blur: false // Default to unblurred
       })
     }
     
@@ -442,11 +471,7 @@ const removeFile = async (index: number) => {
   uploadedFiles.value.splice(index, 1)
 }
 
-const toggleBlur = (index: number) => {
-  if (uploadedFiles.value[index]) {
-    uploadedFiles.value[index].blur = !uploadedFiles.value[index].blur
-  }
-}
+// Removed toggleBlur function - v-model handles the state change directly
 
 
 const addPricingOption = () => {
@@ -595,7 +620,7 @@ const saveAsDraft = async () => {
     console.log('Profile saved as draft successfully')
     
     // Show success message
-    alert('Profile saved as draft successfully!')
+    success('Profile saved as draft successfully!')
   } catch (error: any) {
     console.error('Error saving draft:', error)
     console.error('Error details:', {
@@ -609,7 +634,7 @@ const saveAsDraft = async () => {
     // Show more specific error message
     const errorMessage = error.message || 'Failed to save draft. Please try again.'
     authStore.setError(errorMessage)
-    alert(`Error: ${errorMessage}`)
+    showError(errorMessage)
   } finally {
     isSaving.value = false
   }
@@ -853,6 +878,12 @@ const getFileType = (mimeType: string): string => {
         <div class="section-header">
           <h2>Basic Information</h2>
           <p class="section-subtitle">Let's start with your professional details</p>
+          <div v-if="steps[0].isComplete" class="step-complete-badge">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            <span>Section Complete</span>
+          </div>
         </div>
         
         <div class="form-grid">
@@ -971,6 +1002,12 @@ const getFileType = (mimeType: string): string => {
         <div class="section-header">
           <h2>Services Offered</h2>
           <p class="section-subtitle">Select and describe the experiences you provide</p>
+          <div v-if="steps[1].isComplete" class="step-complete-badge">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            <span>Section Complete</span>
+          </div>
         </div>
         
         <div class="services-selection">
@@ -1014,8 +1051,16 @@ const getFileType = (mimeType: string): string => {
       
       <!-- Step 3: Pricing -->
       <div v-if="currentStep === 3" class="form-section">
-        <h2>Pricing Options</h2>
-        <p class="section-description">Set flexible pricing for different durations and packages</p>
+        <div class="section-header">
+          <h2>Pricing Options</h2>
+          <p class="section-description">Set flexible pricing for different durations and packages</p>
+          <div v-if="steps[2].isComplete" class="step-complete-badge">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            <span>Section Complete</span>
+          </div>
+        </div>
         
         <div class="pricing-list">
           <div v-for="(pricing, index) in form.pricing" :key="index" class="pricing-item">
@@ -1035,7 +1080,7 @@ const getFileType = (mimeType: string): string => {
               <div class="form-group">
                 <label>Amount *</label>
                 <div class="rate-input">
-                  <span class="currency">$</span>
+                  <span class="currency">{{ currencySymbol }}</span>
                   <input 
                     v-model="pricing.amount"
                     type="number"
@@ -1048,7 +1093,7 @@ const getFileType = (mimeType: string): string => {
               
               <div class="form-group">
                 <label>Type</label>
-                <select v-model="pricing.type" :disabled="index < 3">
+                <select v-model="pricing.type" :disabled="index < 3 || pricing.type === 'custom'">
                   <option v-for="type in pricingTypes" :key="type.value" :value="type.value">
                     {{ type.label }}
                   </option>
@@ -1074,8 +1119,16 @@ const getFileType = (mimeType: string): string => {
       
       <!-- Step 4: Availability -->
       <div v-if="currentStep === 4" class="form-section">
-        <h2>Availability Settings</h2>
-        <p class="section-description">Set your working hours and booking preferences</p>
+        <div class="section-header">
+          <h2>Availability Settings</h2>
+          <p class="section-description">Set your working hours and booking preferences</p>
+          <div v-if="steps[3].isComplete" class="step-complete-badge">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            <span>Section Complete</span>
+          </div>
+        </div>
         
         <div class="working-hours">
           <h3>Working Hours</h3>
@@ -1150,10 +1203,24 @@ const getFileType = (mimeType: string): string => {
       
       <!-- Step 5: Media & Files -->
       <div v-if="currentStep === 5" class="form-section">
-        <h2>Photos, Videos</h2>
-        <p class="section-description">Upload media files to showcase your services</p>
+        <div class="section-header">
+          <h2>Photos, Videos</h2>
+          <p class="section-description">Upload media files to showcase your services</p>
+          <div v-if="steps[4].isComplete" class="step-complete-badge">
+            <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            <span>Section Complete</span>
+          </div>
+        </div>
         
         <div class="uploaded-media" v-if="uploadedFiles.length > 0">
+          <div class="blur-info">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+            </svg>
+            <span>You can blur faces in photos to protect your privacy</span>
+          </div>
           <div v-for="(file, index) in uploadedFiles" :key="index" class="media-item">
             <div class="media-preview" :class="{ blurred: file.blur }">
               <!-- Image preview -->
@@ -1182,8 +1249,9 @@ const getFileType = (mimeType: string): string => {
             </div>
             <div class="media-controls">
               <label v-if="(file.file && file.file.type.startsWith('image/')) || (file.existing && !file.file)" class="blur-toggle">
-                <input type="checkbox" v-model="file.blur" @change="toggleBlur(index)" />
-                <span>Blur face</span>
+                <input type="checkbox" v-model="file.blur" />
+                <span class="toggle-switch"></span>
+                <span class="toggle-label">{{ file.blur ? 'Face Blurred' : 'Face Visible' }}</span>
               </label>
               <button type="button" @click="removeFile(index)" class="remove-btn">
                 Remove
@@ -1726,6 +1794,24 @@ const getFileType = (mimeType: string): string => {
   }
 }
 
+.blur-info {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: #e0e7ff;
+  border-radius: 8px;
+  margin-bottom: var(--spacing-md);
+  color: #4c1d95;
+  font-size: 0.9rem;
+  
+  svg {
+    flex-shrink: 0;
+    color: #6366f1;
+  }
+}
+
+
 .uploaded-media {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -1749,8 +1835,20 @@ const getFileType = (mimeType: string): string => {
     }
     
     &.blurred {
-      img, video {
-        filter: blur(10px);
+      position: relative;
+      
+      img {
+        filter: blur(15px);
+      }
+      
+      &::after {
+        content: '👤';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 3rem;
+        opacity: 0.5;
       }
     }
     
@@ -1805,9 +1903,55 @@ const getFileType = (mimeType: string): string => {
       align-items: center;
       gap: var(--spacing-xs);
       font-size: 0.9rem;
+      cursor: pointer;
+      position: relative;
       
       input[type="checkbox"] {
-        width: auto;
+        position: absolute;
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+      
+      .toggle-switch {
+        position: relative;
+        width: 44px;
+        height: 24px;
+        background: #e5e7eb;
+        border-radius: 12px;
+        transition: background 0.3s;
+        flex-shrink: 0;
+        
+        &::after {
+          content: '';
+          position: absolute;
+          top: 2px;
+          left: 2px;
+          width: 20px;
+          height: 20px;
+          background: white;
+          border-radius: 50%;
+          transition: transform 0.3s;
+          box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+      }
+      
+      input[type="checkbox"]:checked + .toggle-switch {
+        background: #6366f1;
+        
+        &::after {
+          transform: translateX(20px);
+        }
+      }
+      
+      .toggle-label {
+        font-weight: 500;
+        color: var(--color-text);
+        user-select: none;
+      }
+      
+      &:hover .toggle-switch {
+        opacity: 0.8;
       }
     }
   }
@@ -2060,6 +2204,7 @@ const getFileType = (mimeType: string): string => {
 .form-section {
   .section-header {
     margin-bottom: var(--spacing-xl);
+    position: relative;
     
     h2 {
       color: var(--color-text-dark);
@@ -2071,6 +2216,31 @@ const getFileType = (mimeType: string): string => {
     .section-subtitle {
       color: var(--color-text-light);
       font-size: 1.1rem;
+    }
+    
+    .step-complete-badge {
+      position: absolute;
+      top: 0;
+      right: 0;
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+      padding: var(--spacing-xs) var(--spacing-sm);
+      background: #d1fae5;
+      color: #10b981;
+      border-radius: 20px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      
+      svg {
+        flex-shrink: 0;
+      }
+      
+      @media (max-width: 640px) {
+        position: static;
+        margin-top: var(--spacing-sm);
+        display: inline-flex;
+      }
     }
   }
 }

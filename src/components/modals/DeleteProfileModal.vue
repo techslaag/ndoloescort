@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useToast } from '../../composables/useToast'
 
 interface Props {
   isOpen: boolean
@@ -17,6 +18,7 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<Emits>()
+const { warning } = useToast()
 
 const confirmationText = ref('')
 const requiredText = computed(() => {
@@ -55,7 +57,7 @@ const handleConfirm = () => {
     emit('confirm')
   } else {
     console.log('Cannot confirm - text does not match')
-    alert(`Please type exactly: ${requiredText.value}`)
+    warning(`Please type exactly: ${requiredText.value}`)
   }
 }
 
