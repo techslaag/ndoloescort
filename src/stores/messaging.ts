@@ -23,7 +23,7 @@ export const AUTO_DELETE_PERIODS = {
 export type AutoDeletePeriod = typeof AUTO_DELETE_PERIODS[keyof typeof AUTO_DELETE_PERIODS]
 
 export interface Message {
-  $id?: string
+  $id: string
   conversationId: string
   senderId: string
   receiverId: string
@@ -51,7 +51,7 @@ export interface Message {
 }
 
 export interface Conversation {
-  $id?: string
+  $id: string
   participants: string[]
   participantRoles: Record<string, 'client' | 'escort' | 'support'>
   initiatedBy: string // Who started the conversation

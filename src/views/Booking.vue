@@ -37,7 +37,10 @@ const availableTimes = ref([
 const services = computed(() => {
   if (!profile.value?.services) return []
   try {
-    return JSON.parse(profile.value.services)
+    if (typeof profile.value.services === 'string') {
+      return JSON.parse(profile.value.services)
+    }
+    return profile.value.services || []
   } catch {
     return []
   }
@@ -46,18 +49,21 @@ const services = computed(() => {
 const pricing = computed(() => {
   if (!profile.value?.pricing) return []
   try {
-    return JSON.parse(profile.value.pricing)
+    if (typeof profile.value.pricing === 'string') {
+      return JSON.parse(profile.value.pricing)
+    }
+    return profile.value.pricing || []
   } catch {
     return []
   }
 })
 
 const selectedServiceDetails = computed(() => {
-  return services.value.find(s => s.id === selectedService.value)
+  return services.value.find((s: any) => s.id === selectedService.value)
 })
 
 const selectedPricing = computed(() => {
-  return pricing.value.find(p => p.type === 'hourly')
+  return pricing.value.find((p: any) => p.type === 'hourly')
 })
 
 const totalCost = computed(() => {
@@ -79,7 +85,7 @@ const loadProfile = async () => {
   try {
     isLoading.value = true
     await profileStore.fetchProfiles()
-    profile.value = profileStore.profiles.find(p => (p.id || p.$id) === profileId)
+    profile.value = profileStore.profiles.find(p => (p.id || (p as any).$id) === profileId)
     
     if (!profile.value) {
       error.value = 'Profile not found'
@@ -129,7 +135,7 @@ const proceedToPayment = async () => {
     try {
       const booking = {
         escortId: profileId,
-        clientId: authStore.user?.$id,
+        clientId: (authStore.user as any)?.$id || authStore.user?.$id,
         service: selectedServiceDetails.value,
         date: selectedDate.value,
         time: selectedTime.value,
@@ -175,8 +181,8 @@ const handlePaymentClosed = () => {
   showPayment.value = false
 }
 
-const handlePaymentError = (error: Error) => {
-  error.value = error.message
+const handlePaymentError = (err: Error) => {
+  error.value = err.message
   showPayment.value = false
 }
 
@@ -291,10 +297,10 @@ const bookAnother = () => {
           <div class="booking-summary-sidebar">
             <div class="summary-card">
               <div class="companion-info">
-                <img :src="profile?.profilePhoto" :alt="profile?.name" class="companion-photo">
+                <img :src="(profile as any)?.profilePhoto || profile?.photo" :alt="profile?.name" class="companion-photo">
                 <div class="companion-details">
                   <h3>{{ profile?.name }}</h3>
-                  <p class="companion-location">{{ profile?.locationCity }}</p>
+                  <p class="companion-location">{{ (profile as any)?.locationCity || profile?.location?.city }}</p>
                 </div>
               </div>
               
@@ -379,14 +385,14 @@ const bookAnother = () => {
         <div class="booking-content">
           <div class="profile-sidebar">
             <div class="profile-card">
-              <img :src="profile?.profilePhoto" :alt="profile?.name" class="profile-photo">
+              <img :src="(profile as any)?.profilePhoto || profile?.photo" :alt="profile?.name" class="profile-photo">
               <div class="profile-info">
                 <h2>{{ profile?.name }}</h2>
-                <p class="profile-location">📍 {{ profile?.locationCity }}</p>
+                <p class="profile-location">📍 {{ (profile as any)?.locationCity || profile?.location?.city }}</p>
                 <p class="profile-age">{{ profile?.age }} years old</p>
                 <div class="profile-rating">
-                  <span class="rating">{{ (profile?.statsRating || 0).toFixed(1) }}⭐</span>
-                  <span class="reviews">({{ profile?.statsReviewCount || 0 }} reviews)</span>
+                  <span class="rating">{{ ((profile as any)?.statsRating || (profile as any)?.stats?.rating || 0).toFixed(1) }}⭐</span>
+                  <span class="reviews">({{ (profile as any)?.statsReviewCount || (profile as any)?.stats?.reviewCount || 0 }} reviews)</span>
                 </div>
               </div>
               

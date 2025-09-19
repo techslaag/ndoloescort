@@ -13,14 +13,38 @@ const profileStore = useProfileStore()
 const notificationStore = useNotificationStore()
 
 const isLoading = ref(false)
-const recentActivity = ref([])
+interface Activity {
+  id: string
+  type: string
+  message: string
+  timestamp: string
+  profileId?: string
+  urgent?: boolean
+  amount?: number
+}
+
+const recentActivity = ref<Activity[]>([])
 const earnings = ref({
   today: 0,
   thisWeek: 0,
   thisMonth: 0,
   pending: 0
 })
-const bookings = ref({
+interface Booking {
+  id: string
+  clientName: string
+  time?: string
+  date?: string
+  duration: string
+  service: string
+  status: string
+}
+
+const bookings = ref<{
+  today: Booking[]
+  upcoming: Booking[]
+  pending: Booking[]
+}>({
   today: [],
   upcoming: [],
   pending: []
@@ -33,12 +57,12 @@ const stats = computed(() => {
     activeProfiles: profiles.filter(p => p.status === 'active').length,
     totalViews: profiles.reduce((total, p) => {
       // Handle different possible property names
-      const views = p.statsViews || p.stats?.views || 0
+      const views = (p as any).statsViews || (p as any).stats?.views || 0
       return total + views
     }, 0),
     totalBookings: profiles.reduce((total, p) => {
       // Handle different possible property names
-      const bookings = p.statsBookings || p.stats?.bookings || 0
+      const bookings = (p as any).statsBookings || (p as any).stats?.bookings || 0
       return total + bookings
     }, 0),
     boostedProfiles: profileStore.boostedProfiles?.length || 0
@@ -91,7 +115,7 @@ const loadDashboardData = async () => {
       }
     } catch (profileError) {
       console.error('Failed to load profiles:', profileError)
-      authStore.setError('Failed to load profile data. Please try refreshing the page.')
+      authStore.setError('Failed to load profile data. Please try refreshing the page.', false)
     }
     
     // Load advertising data for profiles
@@ -381,9 +405,9 @@ const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') =>
         <div v-else class="profiles-grid">
           <div 
             v-for="profile in profiles.slice(0, 3)" 
-            :key="profile.id || profile.$id"
+            :key="profile.id || (profile as any).$id"
             class="profile-card"
-            @click="router.push(`/escort/profiles/${profile.$id || profile.id}`)"
+            @click="router.push(`/escort/profiles/${(profile as any).$id || profile.id}`)""
           >
             <div class="profile-header">
               <h3>{{ profile.name }}</h3>
@@ -395,11 +419,11 @@ const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') =>
             <div class="profile-stats">
               <div class="stat">
                 <span class="stat-label">Views:</span>
-                <span class="stat-value">{{ profile.statsViews || profile.stats?.views || 0 }}</span>
+                <span class="stat-value">{{ (profile as any).statsViews || (profile as any).stats?.views || 0 }}</span>
               </div>
               <div class="stat">
                 <span class="stat-label">Rating:</span>
-                <span class="stat-value">{{ ((profile.statsRating || profile.stats?.rating || 0)).toFixed(1) }}★</span>
+                <span class="stat-value">{{ (((profile as any).statsRating || (profile as any).stats?.rating || 0)).toFixed(1) }}★</span>
               </div>
             </div>
             

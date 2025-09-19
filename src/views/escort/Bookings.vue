@@ -632,7 +632,7 @@ const changeMonth = (direction: number) => {
 }
 
 const getStatusLabel = (status: string) => {
-  const labels = {
+  const labels: Record<string, string> = {
     pending: 'Pending',
     confirmed: 'Confirmed',
     completed: 'Completed',

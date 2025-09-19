@@ -33,14 +33,21 @@ const stats = ref({
 const verificationBadges = computed(() => {
   if (!profile.value) return []
   
-  const badges = []
-  if (profile.value.verificationIsVerified) {
+  interface Badge {
+    icon: string
+    label: string
+    color: string
+  }
+  
+  const badges: Badge[] = []
+  const profileData = profile.value as any
+  if (profileData.verificationIsVerified || profileData.verification?.isVerified) {
     badges.push({ icon: '✓', label: 'Verified', color: 'green' })
   }
-  if (profile.value.verificationIdVerified) {
+  if (profileData.verificationIdVerified || profileData.verification?.idVerified) {
     badges.push({ icon: '🆔', label: 'ID Verified', color: 'blue' })
   }
-  if (profile.value.verificationPhotoVerified) {
+  if (profileData.verificationPhotoVerified || profileData.verification?.photoVerified) {
     badges.push({ icon: '📸', label: 'Photo Verified', color: 'purple' })
   }
   return badges
@@ -60,11 +67,12 @@ const loadProfile = async () => {
     
     // Update stats
     if (profile.value) {
+      const profileData = profile.value as any
       stats.value = {
-        views: profile.value.statsViews || profile.value.stats?.views || 0,
-        bookings: profile.value.statsBookings || profile.value.stats?.bookings || 0,
-        rating: profile.value.statsRating || profile.value.stats?.rating || 0,
-        reviews: profile.value.statsReviewCount || profile.value.stats?.reviewCount || 0,
+        views: profileData.statsViews || profileData.stats?.views || 0,
+        bookings: profileData.statsBookings || profileData.stats?.bookings || 0,
+        rating: profileData.statsRating || profileData.stats?.rating || 0,
+        reviews: profileData.statsReviewCount || profileData.stats?.reviewCount || 0,
         earnings: {
           thisMonth: 2500, // TODO: Fetch from backend
           lastMonth: 3200,
@@ -74,7 +82,7 @@ const loadProfile = async () => {
     }
   } catch (error: any) {
     console.error('Error loading profile:', error)
-    authStore.setError('Failed to load profile details')
+    authStore.setError('Failed to load profile details', false)
   } finally {
     isLoading.value = false
   }
@@ -105,7 +113,7 @@ const toggleProfileStatus = async () => {
     await profileStore.updateProfile(profileId.value, { status: newStatus })
     authStore.setError(`Profile ${newStatus === 'active' ? 'activated' : 'deactivated'} successfully`, true)
   } catch (error) {
-    authStore.setError('Failed to update profile status')
+    authStore.setError('Failed to update profile status', false)
   }
 }
 
@@ -313,23 +321,23 @@ const handleErrorClear = () => {
               </div>
               <div class="detail-item">
                 <span class="label">Height:</span>
-                <span class="value">{{ profile.physicalHeight || 'Not specified' }}</span>
+                <span class="value">{{ (profile as any).physicalHeight || (profile as any).physical?.height || 'Not specified' }}</span>
               </div>
               <div class="detail-item">
                 <span class="label">Body Type:</span>
-                <span class="value">{{ profile.physicalBodyType || 'Not specified' }}</span>
+                <span class="value">{{ (profile as any).physicalBodyType || (profile as any).physical?.bodyType || 'Not specified' }}</span>
               </div>
               <div class="detail-item">
                 <span class="label">Ethnicity:</span>
-                <span class="value">{{ profile.physicalEthnicity || 'Not specified' }}</span>
+                <span class="value">{{ (profile as any).physicalEthnicity || (profile as any).physical?.ethnicity || 'Not specified' }}</span>
               </div>
               <div class="detail-item">
                 <span class="label">Hair Color:</span>
-                <span class="value">{{ profile.physicalHairColor || 'Not specified' }}</span>
+                <span class="value">{{ (profile as any).physicalHairColor || (profile as any).physical?.hairColor || 'Not specified' }}</span>
               </div>
               <div class="detail-item">
                 <span class="label">Eye Color:</span>
-                <span class="value">{{ profile.physicalEyeColor || 'Not specified' }}</span>
+                <span class="value">{{ (profile as any).physicalEyeColor || (profile as any).physical?.eyeColor || 'Not specified' }}</span>
               </div>
             </div>
           </div>
@@ -343,14 +351,14 @@ const handleErrorClear = () => {
               <div v-for="service in profile.services" :key="service.id" class="service-card">
                 <div class="service-header">
                   <h3>{{ service.name }}</h3>
-                  <span :class="['service-status', service.enabled ? 'active' : 'inactive']">
-                    {{ service.enabled ? 'Active' : 'Inactive' }}
+                  <span :class="['service-status', (service as any).enabled ? 'active' : 'inactive']">
+                    {{ (service as any).enabled ? 'Active' : 'Inactive' }}
                   </span>
                 </div>
                 <p class="service-description">{{ service.description }}</p>
                 <div class="service-meta">
-                  <span class="duration">⏱️ {{ service.duration }} min</span>
-                  <span class="price">💵 {{ formatCurrency(service.price) }}</span>
+                  <span class="duration">⏱️ {{ (service as any).duration || service.duration?.min || 'N/A' }} min</span>
+                  <span class="price">💵 {{ formatCurrency((service as any).price || 0) }}</span>
                 </div>
               </div>
             </div>
@@ -401,12 +409,12 @@ const handleErrorClear = () => {
             <h2>Working Hours</h2>
             <div class="availability-grid">
               <div 
-                v-for="(hours, day) in profile.workingHours" 
+                v-for="(hours, day) in ((profile as any).workingHours || {})" 
                 :key="day"
                 class="day-schedule"
                 :class="{ disabled: !hours.enabled }"
               >
-                <h4>{{ day.charAt(0).toUpperCase() + day.slice(1) }}</h4>
+                <h4>{{ String(day).charAt(0).toUpperCase() + String(day).slice(1) }}</h4>
                 <div v-if="hours.enabled" class="hours">
                   {{ hours.start }} - {{ hours.end }}
                 </div>

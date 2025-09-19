@@ -7,7 +7,7 @@ import { useAuthStore } from '../stores/auth'
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
-const escort = ref(null)
+const escort = ref<any>(null)
 const isLoading = ref(true)
 const selectedImage = ref('')
 const activeTab = ref('about')
@@ -50,7 +50,7 @@ const toggleDatePicker = () => {
 
 const proceedToBooking = () => {
   // In a real app, validate inputs and then navigate to booking page
-  if (bookingDate && bookingTime) {
+  if (bookingDate.value && bookingTime.value) {
     router.push({
       name: 'Booking',
       params: { id: route.params.id },
@@ -73,8 +73,8 @@ const startMessage = () => {
   router.push({
     name: 'Messages',
     query: {
-      receiver: escort.value.id,
-      receiverName: escort.value.name
+      receiver: escort.value?.id,
+      receiverName: escort.value?.name
     }
   })
 }
@@ -96,16 +96,16 @@ onMounted(() => {
       <div class="profile-header">
         <div class="container">
           <div class="header-content">
-            <h1>{{ escort.name }}, {{ escort.age }}</h1>
+            <h1>{{ escort?.name }}, {{ escort?.age }}</h1>
             <div class="profile-meta">
               <div class="location">
-                <span class="icon">📍</span> {{ escort.location }}
+                <span class="icon">📍</span> {{ escort?.location }}
               </div>
               <div class="rating">
                 <span class="stars">★★★★★</span>
-                <span class="rating-value">{{ escort.rating.toFixed(1) }}</span>
+                <span class="rating-value">{{ escort?.rating?.toFixed(1) || '0.0' }}</span>
               </div>
-              <div class="rate">{{ escort.rate }}</div>
+              <div class="rate">{{ escort?.rate }}</div>
             </div>
           </div>
         </div>
@@ -116,17 +116,17 @@ onMounted(() => {
           <!-- Profile gallery -->
           <div class="profile-gallery">
             <div class="main-image">
-              <img :src="selectedImage" :alt="`${escort.name}`">
+              <img :src="selectedImage" :alt="`${escort?.name}`">
             </div>
             <div class="thumbnail-images">
               <div 
-                v-for="(image, index) in escort.gallery" 
+                v-for="(image, index) in (escort?.gallery || [])" 
                 :key="index" 
                 class="thumbnail"
                 :class="{ active: selectedImage === image }"
                 @click="selectImage(image)"
               >
-                <img :src="image" :alt="`${escort.name} thumbnail ${index + 1}`">
+                <img :src="image" :alt="`${escort?.name} thumbnail ${index + 1}`">
               </div>
             </div>
           </div>
@@ -169,13 +169,13 @@ onMounted(() => {
             <div class="tab-content">
               <!-- About tab -->
               <div v-if="activeTab === 'about'" class="about-content">
-                <p class="description">{{ escort.description }}</p>
+                <p class="description">{{ escort?.description }}</p>
                 
                 <div class="languages">
                   <h3>Languages</h3>
                   <div class="language-tags">
                     <span 
-                      v-for="(language, index) in escort.languages" 
+                      v-for="(language, index) in (escort?.languages || [])" 
                       :key="index" 
                       class="language-tag"
                     >
@@ -189,7 +189,7 @@ onMounted(() => {
               <div v-if="activeTab === 'services'" class="services-content">
                 <h3>Services Offered</h3>
                 <ul class="services-list">
-                  <li v-for="(service, index) in escort.services" :key="index">
+                  <li v-for="(service, index) in (escort?.services || [])" :key="index">
                     <span class="checkmark">✓</span> {{ service }}
                   </li>
                 </ul>
@@ -204,27 +204,27 @@ onMounted(() => {
                 <div class="stats-grid">
                   <div class="stat-item">
                     <span class="stat-label">Height</span>
-                    <span class="stat-value">{{ escort.height }}</span>
+                    <span class="stat-value">{{ escort?.height }}</span>
                   </div>
                   <div class="stat-item">
                     <span class="stat-label">Measurements</span>
-                    <span class="stat-value">{{ escort.measurements }}</span>
+                    <span class="stat-value">{{ escort?.measurements }}</span>
                   </div>
                   <div class="stat-item">
                     <span class="stat-label">Hair</span>
-                    <span class="stat-value">{{ escort.hairColor }}</span>
+                    <span class="stat-value">{{ escort?.hairColor }}</span>
                   </div>
                   <div class="stat-item">
                     <span class="stat-label">Eyes</span>
-                    <span class="stat-value">{{ escort.eyeColor }}</span>
+                    <span class="stat-value">{{ escort?.eyeColor }}</span>
                   </div>
                   <div class="stat-item">
                     <span class="stat-label">Nationality</span>
-                    <span class="stat-value">{{ escort.nationality }}</span>
+                    <span class="stat-value">{{ escort?.nationality }}</span>
                   </div>
                   <div class="stat-item">
                     <span class="stat-label">Age</span>
-                    <span class="stat-value">{{ escort.age }}</span>
+                    <span class="stat-value">{{ escort?.age }}</span>
                   </div>
                 </div>
               </div>
@@ -233,7 +233,7 @@ onMounted(() => {
               <div v-if="activeTab === 'availability'" class="availability-content">
                 <h3>Availability</h3>
                 <ul class="availability-list">
-                  <li v-for="(time, index) in escort.availability" :key="index">
+                  <li v-for="(time, index) in (escort?.availability || [])" :key="index">
                     {{ time }}
                   </li>
                 </ul>
@@ -246,7 +246,7 @@ onMounted(() => {
             <div class="booking-section">
               <div v-if="!showDatePicker" class="initial-booking">
                 <div class="rate-display">
-                  <div class="rate-amount">{{ escort.rate }}</div>
+                  <div class="rate-amount">{{ escort?.rate }}</div>
                   <div class="rate-label">Starting Rate</div>
                 </div>
                 <div class="action-buttons">

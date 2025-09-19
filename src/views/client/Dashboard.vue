@@ -195,10 +195,47 @@ const authStore = useAuthStore()
 const notificationStore = useNotificationStore()
 
 const isLoading = ref(false)
-const upcomingBookings = ref([])
-const favoriteEscorts = ref([])
-const recentActivity = ref([])
-const recommendations = ref([])
+
+interface Booking {
+  id: string
+  escortName: string
+  escortPhoto: string
+  date: string
+  time: string
+  duration: string
+  service: string
+  status: string
+  location: string
+}
+
+interface Escort {
+  id: string
+  name: string
+  photo: string
+  rating: number
+  reviewCount: number
+  location: string
+}
+
+interface Activity {
+  id: string
+  type: string
+  message: string
+  timestamp: string
+}
+
+interface Recommendation {
+  id: string
+  name: string
+  photo: string
+  location: string
+  reason: string
+}
+
+const upcomingBookings = ref<Booking[]>([])
+const favoriteEscorts = ref<Escort[]>([])
+const recentActivity = ref<Activity[]>([])
+const recommendations = ref<Recommendation[]>([])
 
 const stats = ref({
   totalBookings: 0,
@@ -363,7 +400,7 @@ const loadDashboardData = async () => {
     
   } catch (error) {
     console.error('Error loading dashboard data:', error)
-    authStore.setError('Failed to load dashboard data')
+    authStore.setError('Failed to load dashboard data', false)
   } finally {
     isLoading.value = false
   }

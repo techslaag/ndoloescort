@@ -35,13 +35,15 @@ const getUnreadCountForProfile = (profileId: string) => {
   // Filter conversations by profile
   const profileConversations = messagingStore.conversations.filter(conv => {
     // Check if the conversation involves this specific profile
-    return conv.escortId === profileId || conv.profileId === profileId
+    // Look for conversations where the profileId is a participant with escort role
+    return conv.participants.includes(profileId) && 
+           conv.participantRoles[profileId] === 'escort'
   })
   
   // Count unread messages across all conversations for this profile
   let unreadCount = 0
   profileConversations.forEach(conv => {
-    const messages = messagingStore.messages[conv.id] || []
+    const messages = messagingStore.messages[conv.$id] || []
     messages.forEach(msg => {
       if (!msg.isRead && msg.senderId !== authStore.user?.$id) {
         unreadCount++
@@ -154,7 +156,7 @@ const toggleProfileStatus = async (profile: any) => {
     }
     
     // Determine new status
-    let newStatus = 'active'
+    let newStatus: 'draft' | 'active' | 'paused' | 'inactive' = 'active'
     if (profile.status === 'active') {
       newStatus = 'paused'
     } else if (profile.status === 'paused') {
@@ -434,7 +436,7 @@ const closeDeleteModal = () => {
               <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
               </svg>
-              <template v-if="profile.status === 'active'">Desactivate</template>
+              <template v-if="profile.status === 'active'">Deactivate</template>
               <template v-else-if="profile.status === 'paused'">Activate</template>
               <template v-else>Activate</template>
             </button>

@@ -140,7 +140,7 @@ const readPost = (postId: number) => {
             <div class="author-info">
               <span class="author">By {{ blogPosts.find(post => post.featured)?.author }}</span>
             </div>
-            <button @click="readPost(blogPosts.find(post => post.featured)?.id)" class="btn btn-primary">
+            <button @click="readPost(blogPosts.find(post => post.featured)?.id ?? 0)" class="btn btn-primary">
               Read Full Article
             </button>
           </div>

@@ -23,7 +23,7 @@ const success = ref('')
 
 const profiles = computed(() => profileStore.profiles || [])
 const selectedProfileData = computed(() => {
-  return profiles.value.find(p => (p.$id || p.id) === selectedProfile.value)
+  return profiles.value.find(p => ((p as any).$id || p.id) === selectedProfile.value)
 })
 
 const premiumPlans = computed(() => {
@@ -57,8 +57,8 @@ const loadData = async () => {
     await profileStore.fetchProfiles()
     
     if (profiles.value.length > 0) {
-      selectedProfile.value = profiles.value[0].$id || profiles.value[0].id
-      selectedCity.value = profiles.value[0].locationCity || cityOptions.value[0]
+      selectedProfile.value = (profiles.value[0] as any).$id || profiles.value[0].id
+      selectedCity.value = profiles.value[0].location?.city || cityOptions.value[0]
       await loadAdvertisingDashboard()
     }
   } catch (err: any) {
@@ -81,7 +81,7 @@ const loadAdvertisingDashboard = async () => {
 const onProfileChange = async () => {
   const profile = selectedProfileData.value
   if (profile) {
-    selectedCity.value = profile.locationCity || cityOptions.value[0]
+    selectedCity.value = profile.location?.city || cityOptions.value[0]
     await loadAdvertisingDashboard()
   }
 }
@@ -115,7 +115,7 @@ const proceedToPurchase = () => {
   showPayment.value = true
 }
 
-const handlePaymentSuccess = async (paymentData: any) => {
+const handlePaymentSuccess = async (transactionId: string) => {
   try {
     if (!selectedPlan.value) return
     
@@ -124,7 +124,7 @@ const handlePaymentSuccess = async (paymentData: any) => {
       selectedProfile.value,
       selectedPlan.value.id,
       selectedCity.value,
-      authStore.user?.$id || '',
+      (authStore.user as any)?.$id || authStore.user?.$id || '',
       true
     )
     
@@ -144,8 +144,8 @@ const handlePaymentSuccess = async (paymentData: any) => {
   }
 }
 
-const handlePaymentError = (errorMessage: string) => {
-  error.value = errorMessage
+const handlePaymentError = (err: Error) => {
+  error.value = err.message || 'Payment failed'
   showPayment.value = false
 }
 
@@ -157,8 +157,8 @@ const cancelPurchase = () => {
 
 const cancelCampaign = async (campaignId: string) => {
   try {
-    const success = await advertisingService.cancelAdvertising(campaignId)
-    if (success) {
+    const result = await advertisingService.cancelAdvertising(campaignId)
+    if (result) {
       success.value = 'Campaign cancelled successfully'
       await loadAdvertisingDashboard()
     } else {
@@ -231,10 +231,10 @@ const getProgressPercentage = (startDate: string, endDate: string) => {
             <option value="">Choose a profile...</option>
             <option 
               v-for="profile in profiles" 
-              :key="profile.$id || profile.id"
-              :value="profile.$id || profile.id"
+              :key="(profile as any).$id || profile.id"
+              :value="(profile as any).$id || profile.id"
             >
-              {{ profile.name }} - {{ profile.locationCity }}
+              {{ profile.name }} - {{ profile.location?.city }}
             </option>
           </select>
         </div>
@@ -300,9 +300,10 @@ const getProgressPercentage = (startDate: string, endDate: string) => {
           <div class="payment-form-section">
             <PaymentForm 
               :amount="selectedPlan?.price || 0"
-              :description="`${selectedPlan?.name} for ${selectedProfileData?.name}`"
-              @payment-success="handlePaymentSuccess"
-              @payment-error="handlePaymentError"
+              :booking-id="`ad-${Date.now()}`"
+              :escort-id="selectedProfile"
+              @success="handlePaymentSuccess"
+              @error="handlePaymentError"
             />
           </div>
         </div>
@@ -660,7 +661,7 @@ const getProgressPercentage = (startDate: string, endDate: string) => {
   }
   
   &.exclusive {
-    border-left-color: #gold;
+    border-left-color: #ffd700;
     background: linear-gradient(135deg, #fff 0%, #fff9e6 100%);
   }
   

@@ -54,7 +54,10 @@ const toggleConfirmPassword = () => {
 // Check password strength on input
 const checkPasswordStrength = () => {
   const strength = authStore.validatePasswordStrength(form.value.password)
-  passwordStrength.value = strength
+  passwordStrength.value = {
+    score: strength.score,
+    feedback: Array.isArray(strength.feedback) ? strength.feedback.join('. ') : strength.feedback
+  }
 }
 
 watch(() => form.value.password, checkPasswordStrength)
@@ -94,7 +97,7 @@ const handleSignup = async () => {
     
     if (result.success) {
       // Check if user is an escort and redirect to dashboard
-      const userType = authStore.user?.prefs?.userType || form.value.userType
+      const userType = (authStore.user?.prefs as any)?.userType || form.value.userType
       if (userType === 'escort') {
         router.push('/escort/dashboard')
       } else {
@@ -127,6 +130,7 @@ const openPrivacy = () => {
 
 <template>
   <div class="signup-form">
+    <form @submit.prevent="handleSignup">
     <ErrorAlert 
       :error="authStore.error"
       :auto-clear="false"
@@ -295,7 +299,6 @@ const openPrivacy = () => {
       type="submit" 
       class="btn btn-primary btn-lg"
       :disabled="isLoading || authStore.isLoading"
-      @click="handleSignup"
     >
       <span v-if="isLoading || authStore.isLoading">Creating Account...</span>
       <span v-else>Create Account</span>
@@ -304,6 +307,7 @@ const openPrivacy = () => {
     <div class="login-link">
       <p>Already have an account? <a @click="navigateToLogin">Sign in here</a></p>
     </div>
+    </form>
   </div>
 </template>
 
@@ -325,7 +329,7 @@ const openPrivacy = () => {
     display: block;
     margin-bottom: var(--spacing-sm);
     font-weight: 500;
-    color: #374151;
+    color: var(--color-text-dark);
     font-size: 0.9rem;
   }
 }
@@ -409,49 +413,49 @@ const openPrivacy = () => {
     
     .feedback {
       font-weight: normal;
-      color: #6b7280;
+      color: var(--color-text-light);
     }
   }
 }
 
-  .checkbox-label {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    cursor: pointer;
-    font-size: 0.9rem;
-    line-height: 1.4;
-    color: var(--color-text-dark);
-    user-select: none;
-    
-    &.error {
-      .checkmark {
-        border-color: var(--color-error);
-      }
+.checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: var(--color-text-dark);
+  user-select: none;
+  
+  &.error {
+    .checkmark {
+      border-color: var(--color-error);
     }
+  }
   
   input[type="checkbox"] {
     display: none;
   }
   
-      .checkmark {
-      width: 16px;
-      height: 16px;
-      border: 2px solid var(--color-text-lighter);
-      border-radius: var(--border-radius-sm);
-      position: relative;
-      transition: all 0.2s ease;
-      margin-top: 2px;
-      flex-shrink: 0;
-      
-      &:hover {
-        border-color: var(--color-accent);
-      }
-    }
+  .checkmark {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--color-text-lighter);
+    border-radius: var(--border-radius-sm);
+    position: relative;
+    transition: all 0.2s ease;
+    margin-top: 2px;
+    flex-shrink: 0;
     
-    input[type="checkbox"]:checked + .checkmark {
-      background-color: var(--color-accent);
+    &:hover {
       border-color: var(--color-accent);
+    }
+  }
+  
+  input[type="checkbox"]:checked + .checkmark {
+    background-color: var(--color-accent);
+    border-color: var(--color-accent);
     
     &::after {
       content: '';
@@ -495,25 +499,25 @@ const openPrivacy = () => {
   margin-top: var(--spacing-sm);
 }
 
-  .user-type-option {
-    display: block;
-    cursor: pointer;
-    border: 2px solid var(--color-text-lighter);
-    border-radius: var(--border-radius-lg);
-    padding: 20px;
-    transition: all 0.3s ease;
-    background-color: var(--color-background-alt);
-    
-    &:hover {
-      border-color: var(--color-accent);
-      background-color: var(--color-background);
-    }
-    
-    &.selected {
-      border-color: var(--color-accent);
-      background-color: rgba(183, 110, 121, 0.1);
-      box-shadow: 0 4px 12px rgba(183, 110, 121, 0.15);
-    }
+.user-type-option {
+  display: block;
+  cursor: pointer;
+  border: 2px solid var(--color-text-lighter);
+  border-radius: var(--border-radius-lg);
+  padding: 20px;
+  transition: all 0.3s ease;
+  background-color: var(--color-background-alt);
+  
+  &:hover {
+    border-color: var(--color-accent);
+    background-color: var(--color-background);
+  }
+  
+  &.selected {
+    border-color: var(--color-accent);
+    background-color: rgba(183, 110, 121, 0.1);
+    box-shadow: 0 4px 12px rgba(183, 110, 121, 0.15);
+  }
   
   input[type="radio"] {
     display: none;
@@ -544,13 +548,13 @@ const openPrivacy = () => {
       margin: 0 0 4px 0;
       font-size: 1rem;
       font-weight: 600;
-      color: #374151;
+      color: var(--color-text-dark);
     }
     
     p {
       margin: 0;
       font-size: 0.85rem;
-      color: #6b7280;
+      color: var(--color-text-light);
       line-height: 1.4;
     }
   }
@@ -598,7 +602,7 @@ const openPrivacy = () => {
   margin-top: var(--spacing-lg);
   
   p {
-    color: #6b7280;
+    color: var(--color-text-light);
     font-size: 0.9rem;
     margin: 0;
   }

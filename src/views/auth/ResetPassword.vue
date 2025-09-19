@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useAuthStore } from '../stores/auth'
-import { account } from '../lib/appwrite'
-import ErrorAlert from '../components/ErrorAlert.vue'
+import { useAuthStore } from '../../stores/auth'
+import { account } from '../../lib/appwrite'
+import ErrorAlert from '../../components/ErrorAlert.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -80,8 +80,7 @@ const handleResetPassword = async () => {
     await account.updateRecovery(
       userId.value,
       secret.value,
-      form.value.password,
-      form.value.confirmPassword
+      form.value.password
     )
     
     success.value = true

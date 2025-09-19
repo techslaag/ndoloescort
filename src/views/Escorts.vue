@@ -6,8 +6,8 @@ import { fetchAllEscorts, searchEscorts, filterEscortsByLocation, filterEscortsB
 import { availableServices } from '../constants/services'
 
 const router = useRouter()
-const escorts = ref([])
-const filteredEscorts = ref([])
+const escorts = ref<any[]>([])
+const filteredEscorts = ref<any[]>([])
 const isLoading = ref(true)
 const searchQuery = ref('')
 const selectedLocation = ref('')
@@ -77,8 +77,8 @@ const applyFilters = async () => {
     if (selectedService.value) {
       // If we already filtered by location, filter these results further
       if (selectedLocation.value) {
-        results = results.filter(escort => 
-          escort.services.some(s => s.toLowerCase() === selectedService.value.toLowerCase())
+        results = results.filter((escort: any) => 
+          escort.services?.some((s: any) => s.toLowerCase() === selectedService.value.toLowerCase())
         )
       } else {
         results = await filterEscortsByService(selectedService.value)
@@ -86,10 +86,10 @@ const applyFilters = async () => {
     }
     
     if (searchQuery.value.trim()) {
-      results = results.filter(escort => 
-        escort.name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-        escort.location.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-        escort.services.some(service => service.toLowerCase().includes(searchQuery.value.toLowerCase()))
+      results = results.filter((escort: any) => 
+        escort.name?.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+        escort.location?.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+        escort.services?.some((service: any) => service.toLowerCase().includes(searchQuery.value.toLowerCase()))
       )
     }
     
