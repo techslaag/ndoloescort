@@ -105,10 +105,10 @@ export class BookingService {
         DATABASE_ID,
         BOOKINGS_COLLECTION_ID,
         ID.unique(),
-        data
+        data as any
       )
 
-      const booking = response as Booking
+      const booking = response as unknown as Booking
 
       // Send notification to escort
       await notificationService.createNotification(
@@ -118,9 +118,9 @@ export class BookingService {
         `You have a new booking request for ${booking.startDateTime}`,
         {
           bookingId: booking.$id,
-          clientName: authStore.user.name,
+          clientName: (authStore.user as any).name,
           service: booking.service
-        }
+        } as any
       )
 
       return booking
@@ -158,7 +158,7 @@ export class BookingService {
       )
 
       // Enrich bookings with client data
-      const bookings = await this.enrichBookingsWithUserData(response.documents as Booking[], 'client')
+      const bookings = await this.enrichBookingsWithUserData(response.documents as unknown as Booking[], 'client')
 
       return bookings
     } catch (error) {
@@ -189,7 +189,7 @@ export class BookingService {
       )
 
       // Enrich bookings with escort data
-      const bookings = await this.enrichBookingsWithUserData(response.documents as Booking[], 'escort')
+      const bookings = await this.enrichBookingsWithUserData(response.documents as unknown as Booking[], 'escort')
 
       return bookings
     } catch (error) {
@@ -207,7 +207,7 @@ export class BookingService {
         bookingId
       )
 
-      return response as Booking
+      return response as unknown as Booking
     } catch (error) {
       console.error('Failed to get booking:', error)
       return null
@@ -246,7 +246,7 @@ export class BookingService {
         updates
       )
 
-      const booking = response as Booking
+      const booking = response as unknown as Booking
 
       // Send appropriate notifications
       if (status === 'confirmed') {
@@ -264,7 +264,7 @@ export class BookingService {
           'booking_cancelled',
           'Booking Cancelled',
           `Booking for ${booking.startDateTime} has been cancelled`,
-          { bookingId: booking.$id, reason: notes }
+          { bookingId: booking.$id, reason: notes } as any
         )
       }
 
@@ -323,7 +323,7 @@ export class BookingService {
         ]
       )
 
-      const bookings = response.documents as Booking[]
+      const bookings = response.documents as unknown as Booking[]
       const now = new Date()
       const today = now.toISOString().split('T')[0]
       
@@ -441,7 +441,7 @@ export class BookingService {
   ): Promise<Booking[]> {
     try {
       // Get unique user IDs
-      const userIds = [...new Set(bookings.map(b => userType === 'client' ? b.clientId : b.escortId))]
+      const userIds = Array.from(new Set(bookings.map(b => userType === 'client' ? b.clientId : b.escortId)))
       
       if (userIds.length === 0) return bookings
 
@@ -514,7 +514,7 @@ export class BookingService {
         ]
       )
 
-      const bookings = response.documents as Booking[]
+      const bookings = response.documents as unknown as Booking[]
 
       for (const booking of bookings) {
         const bookingTime = new Date(booking.startDateTime)

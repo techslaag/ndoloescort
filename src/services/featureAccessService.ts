@@ -281,16 +281,16 @@ export class FeatureAccessService {
     }
 
     return {
-      profilesPerMonth: currentPlan.profilesPerMonth,
+      profilesPerMonth: (currentPlan as any).profilesPerMonth,
       premiumBoosts: currentPlan.features.premiumBoosts || 0,
       canAccessVideoCall: currentPlan.features.videoCall,
       canAccessAudioCall: currentPlan.features.audioCall,
       canAccessLiveStreaming: currentPlan.features.liveStreaming,
       canAccessPrivateRoom: currentPlan.features.privateRoom,
-      canReceiveGifts: currentPlan.features.receiveGift,
+      canReceiveGifts: currentPlan.features.receiveGifts,
       canEarnCallRevenue: currentPlan.features.callRevenue,
       canAccessBlissEscortRewards: currentPlan.features.blissescortReward,
-      hasPrioritySupport: currentPlan.features.support === 'priority'
+      hasPrioritySupport: (currentPlan.features as any).support === 'priority'
     }
   }
 

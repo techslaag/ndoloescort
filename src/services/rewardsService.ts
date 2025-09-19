@@ -128,7 +128,7 @@ export class RewardsService {
       )
 
       if (response.documents.length > 0) {
-        return response.documents[0] as UserPoints
+        return response.documents[0] as unknown as UserPoints
       }
 
       // Create new points record
@@ -144,10 +144,10 @@ export class RewardsService {
         DATABASE_ID,
         REWARD_POINTS_COLLECTION_ID,
         ID.unique(),
-        newPoints
+        newPoints as any
       )
 
-      return created as UserPoints
+      return created as unknown as UserPoints
     } catch (error) {
       console.error('Failed to get user points:', error)
       return null
@@ -190,7 +190,7 @@ export class RewardsService {
         DATABASE_ID,
         REWARD_POINTS_COLLECTION_ID,
         ID.unique(),
-        transaction
+        transaction as any
       )
 
       // Update user points
@@ -308,7 +308,7 @@ export class RewardsService {
           return false
         }
         return true
-      }) as Reward[]
+      }) as unknown as Reward[]
     } catch (error) {
       console.error('Failed to get available rewards:', error)
       return []
@@ -334,7 +334,7 @@ export class RewardsService {
         DATABASE_ID,
         REWARDS_COLLECTION_ID,
         rewardId
-      ) as Reward
+      ) as unknown as Reward
 
       // Check if user has enough points
       if (userPoints.availablePoints < reward.pointsCost) {
@@ -367,7 +367,7 @@ export class RewardsService {
         DATABASE_ID,
         REWARD_REDEMPTIONS_COLLECTION_ID,
         ID.unique(),
-        redemption
+        redemption as any
       )
 
       // Deduct points
@@ -383,7 +383,7 @@ export class RewardsService {
         DATABASE_ID,
         REWARD_POINTS_COLLECTION_ID,
         ID.unique(),
-        transaction
+        transaction as any
       )
 
       // Update user points
@@ -409,9 +409,9 @@ export class RewardsService {
       }
 
       // Process reward based on type
-      await this.processRedemption(created as Redemption, reward)
+      await this.processRedemption(created as unknown as Redemption, reward)
 
-      return created as Redemption
+      return created as unknown as Redemption
     } catch (error: any) {
       console.error('Failed to redeem reward:', error)
       throw error
@@ -481,7 +481,7 @@ export class RewardsService {
         ]
       )
 
-      return response.documents as Redemption[]
+      return response.documents as unknown as Redemption[]
     } catch (error) {
       console.error('Failed to get redemption history:', error)
       return []
@@ -501,7 +501,7 @@ export class RewardsService {
         ]
       )
 
-      return response.documents as PointTransaction[]
+      return response.documents as unknown as PointTransaction[]
     } catch (error) {
       console.error('Failed to get points history:', error)
       return []
@@ -589,7 +589,7 @@ export class RewardsService {
           DATABASE_ID,
           REWARDS_COLLECTION_ID,
           ID.unique(),
-          reward
+          reward as any
         )
       }
     } catch (error) {

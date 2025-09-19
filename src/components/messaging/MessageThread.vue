@@ -71,7 +71,9 @@ const scrollToBottom = async () => {
   await nextTick()
   if (messagesContainer.value) {
     requestAnimationFrame(() => {
-      messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+      if (messagesContainer.value) {
+        messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+      }
     })
   }
 }
@@ -621,7 +623,7 @@ onMounted(async () => {
       if (!isScrolling) return
       
       // Add momentum scrolling for iOS
-      messagesContainer.value!.style.webkitOverflowScrolling = 'touch'
+      ;(messagesContainer.value!.style as any).webkitOverflowScrolling = 'touch'
       
       // Load more messages when scrolling to top
       if (messagesContainer.value!.scrollTop < 100 && !isLoadingMore && messages.value.length >= 50) {

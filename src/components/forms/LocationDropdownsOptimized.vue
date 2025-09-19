@@ -125,16 +125,6 @@ const loadCitiesForState = async (stateId: number) => {
   }
 }
 
-// Load cities for a country (when no state is selected)
-const loadCitiesForCountry = async (countryId: number) => {
-  isLoadingCities.value = true
-  cities.value = [] // Clear previous cities
-  try {
-    cities.value = await locationCache.getCities(0, countryId)
-  } finally {
-    isLoadingCities.value = false
-  }
-}
 
 // Filtered lists with performance optimization
 const filteredCountries = computed(() => {
@@ -371,12 +361,25 @@ const clearCity = () => {
   emitUpdate()
 }
 
-// Close all dropdowns
-const closeDropdowns = () => {
-  showCountryDropdown.value = false
-  showStateDropdown.value = false
-  showCityDropdown.value = false
+// Blur handlers with timeout
+const handleCountryBlur = () => {
+  setTimeout(() => {
+    showCountryDropdown.value = false
+  }, 200)
 }
+
+const handleStateBlur = () => {
+  setTimeout(() => {
+    showStateDropdown.value = false
+  }, 200)
+}
+
+const handleCityBlur = () => {
+  setTimeout(() => {
+    showCityDropdown.value = false
+  }, 200)
+}
+
 </script>
 
 <template>
@@ -393,7 +396,7 @@ const closeDropdowns = () => {
           type="text"
           :placeholder="selectedCountry ? selectedCountry.name : 'Select a country'"
           @focus="handleCountryFocus"
-          @blur="setTimeout(() => showCountryDropdown = false, 200)"
+          @blur="handleCountryBlur"
           :disabled="disabled"
           class="dropdown-input"
           autocomplete="off"
@@ -445,7 +448,7 @@ const closeDropdowns = () => {
           type="text"
           :placeholder="selectedState ? selectedState.name : 'Select a state/province'"
           @focus="handleStateFocus"
-          @blur="setTimeout(() => showStateDropdown = false, 200)"
+          @blur="handleStateBlur"
           :disabled="disabled || !selectedCountry"
           class="dropdown-input"
           autocomplete="off"
@@ -495,7 +498,7 @@ const closeDropdowns = () => {
           type="text"
           :placeholder="selectedCity ? selectedCity.name : 'Select a city'"
           @focus="handleCityFocus"
-          @blur="setTimeout(() => showCityDropdown = false, 200)"
+          @blur="handleCityBlur"
           :disabled="disabled || (!selectedState && !selectedCountry)"
           class="dropdown-input"
           autocomplete="off"

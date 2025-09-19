@@ -151,9 +151,9 @@ const makePayment = () => {
     onclose: handlePaymentClose
   }
 
-  // @ts-ignore - FlutterwaveCheckout is loaded from CDN
-  if (typeof window !== 'undefined' && window.FlutterwaveCheckout) {
-    window.FlutterwaveCheckout(flwConfig)
+  // FlutterwaveCheckout is loaded from CDN
+  if (typeof window !== 'undefined' && (window as any).FlutterwaveCheckout) {
+    (window as any).FlutterwaveCheckout(flwConfig)
   } else {
     // Fallback to service method
     flutterwaveService.initializePayment(flwConfig)

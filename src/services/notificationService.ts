@@ -154,7 +154,7 @@ export class NotificationService {
       profile_view: true,
       badge_earned: true,
       system_alert: true,
-      promotion: prefs.push.marketing ?? false,
+      promotion: (prefs.push as any).marketing ?? false,
       reminder: true
     }
 
@@ -221,8 +221,8 @@ export class NotificationService {
         tag: notification.type,
         requireInteraction: notification.priority === 'high',
         silent: !prefs.push.sound,
-        vibrate: prefs.push.vibration ? [200, 100, 200] : undefined,
-        data: notification.data
+        data: notification.data,
+        ...(prefs.push.vibration && { vibrate: [200, 100, 200] })
       }
 
       const pushNotification = new Notification(notification.title, options)
@@ -678,7 +678,7 @@ export class NotificationService {
     
     await this.createNotification(
       userId,
-      'security_alert',
+'system_alert' as any,
       title,
       message,
       { 
@@ -687,7 +687,7 @@ export class NotificationService {
         location,
         deviceInfo,
         timestamp: new Date().toISOString()
-      },
+      } as any,
       'high'
     )
   }
@@ -707,10 +707,10 @@ export class NotificationService {
     
     await this.createNotification(
       userId,
-      'security_alert',
+'system_alert' as any,
       titles[eventType] || 'Security Alert',
       details,
-      { eventType },
+      { eventType } as any,
       'high'
     )
   }

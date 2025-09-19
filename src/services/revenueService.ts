@@ -98,10 +98,10 @@ export class RevenueService {
         DATABASE_ID,
         REVENUE_COLLECTION_ID,
         ID.unique(),
-        revenueData
+        revenueData as any
       )
 
-      return response as CallRevenue
+      return response as unknown as CallRevenue
     } catch (error) {
       console.error('Failed to record call revenue:', error)
       return null
@@ -145,10 +145,10 @@ export class RevenueService {
         DATABASE_ID,
         REVENUE_COLLECTION_ID,
         ID.unique(),
-        revenueData
+        revenueData as any
       )
 
-      return response as GiftRevenue
+      return response as unknown as GiftRevenue
     } catch (error) {
       console.error('Failed to record gift revenue:', error)
       return null
@@ -270,7 +270,7 @@ export class RevenueService {
         ]
       )
 
-      return response.documents as Array<CallRevenue | GiftRevenue>
+      return response.documents as unknown as Array<CallRevenue | GiftRevenue>
     } catch (error) {
       console.error('Failed to get revenue history:', error)
       return []
@@ -311,10 +311,10 @@ export class RevenueService {
         DATABASE_ID,
         PAYOUTS_COLLECTION_ID,
         ID.unique(),
-        payoutData
+        payoutData as any
       )
 
-      return response as PayoutRequest
+      return response as unknown as PayoutRequest
     } catch (error: any) {
       console.error('Failed to request payout:', error)
       throw error
@@ -334,7 +334,7 @@ export class RevenueService {
         ]
       )
 
-      return response.documents as PayoutRequest[]
+      return response.documents as unknown as PayoutRequest[]
     } catch (error) {
       console.error('Failed to get payout history:', error)
       return []

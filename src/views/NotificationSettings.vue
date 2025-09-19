@@ -128,7 +128,7 @@ const loadPreferences = async () => {
     const response = await databases.listDocuments(
       DATABASE_ID,
       NOTIFICATION_PREFS_COLLECTION_ID,
-      [Query.equal('userId', authStore.user.$id)]
+      [Query.equal('userId', (authStore.user as any).$id)]
     )
     
     if (response.documents.length > 0) {
@@ -178,7 +178,7 @@ const savePreferences = async () => {
     successMessage.value = ''
     
     const prefsData = {
-      userId: authStore.user.$id,
+      userId: (authStore.user as any).$id,
       emailNotifications: preferences.emailNotifications,
       smsNotifications: preferences.smsNotifications,
       pushNotifications: preferences.pushNotifications,
@@ -225,21 +225,21 @@ const savePreferences = async () => {
 
 // Toggle all notifications for a category
 const toggleCategory = (category: any, type: 'email' | 'sms' | 'push') => {
-  const allEnabled = category.settings.every((s: any) => detailedSettings[s.key][type])
+  const allEnabled = category.settings.every((s: any) => (detailedSettings as any)[s.key][type])
   
   category.settings.forEach((setting: any) => {
-    detailedSettings[setting.key][type] = !allEnabled
+    (detailedSettings as any)[setting.key][type] = !allEnabled
   })
 }
 
 // Check if all in category are enabled
 const isCategoryEnabled = (category: any, type: 'email' | 'sms' | 'push') => {
-  return category.settings.every((s: any) => detailedSettings[s.key][type])
+  return category.settings.every((s: any) => (detailedSettings as any)[s.key][type])
 }
 
 // Check if some in category are enabled
 const isCategoryPartial = (category: any, type: 'email' | 'sms' | 'push') => {
-  const enabledCount = category.settings.filter((s: any) => detailedSettings[s.key][type]).length
+  const enabledCount = category.settings.filter((s: any) => (detailedSettings as any)[s.key][type]).length
   return enabledCount > 0 && enabledCount < category.settings.length
 }
 
@@ -462,7 +462,7 @@ onMounted(() => {
                 <div class="notification-toggles">
                   <label class="checkbox-label">
                     <input 
-                      v-model="detailedSettings[setting.key].email" 
+                      v-model="(detailedSettings as any)[setting.key].email" 
                       type="checkbox"
                       :disabled="!preferences.emailNotifications"
                     />
@@ -470,7 +470,7 @@ onMounted(() => {
                   </label>
                   <label class="checkbox-label">
                     <input 
-                      v-model="detailedSettings[setting.key].sms" 
+                      v-model="(detailedSettings as any)[setting.key].sms" 
                       type="checkbox"
                       :disabled="!preferences.smsNotifications"
                     />
@@ -478,7 +478,7 @@ onMounted(() => {
                   </label>
                   <label class="checkbox-label">
                     <input 
-                      v-model="detailedSettings[setting.key].push" 
+                      v-model="(detailedSettings as any)[setting.key].push" 
                       type="checkbox"
                       :disabled="!preferences.pushNotifications"
                     />

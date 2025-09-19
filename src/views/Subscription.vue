@@ -30,9 +30,6 @@ const currentUsage = computed(() => subscriptionStore.currentUsage)
 const daysUntilRenewal = computed(() => subscriptionStore.daysUntilRenewal)
 
 const isAuthenticated = computed(() => authStore.isAuthenticated)
-const isEscort = computed(() => {
-  return authStore.user?.prefs?.userType === 'escort'
-})
 
 onMounted(async () => {
   if (!isAuthenticated.value) {
@@ -111,11 +108,11 @@ const handlePaymentClosed = () => {
   showPayment.value = false
 }
 
-const handlePaymentError = (error: Error) => {
-  console.error('Payment error:', error)
+const handlePaymentError = (err: Error) => {
+  console.error('Payment error:', err)
   showPayment.value = false
   // Show error to user
-  subscriptionStore.error = error.message
+  subscriptionStore.error = err.message
 }
 
 const cancelSubscription = async () => {
@@ -185,7 +182,7 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
       <ErrorAlert 
         :error="subscriptionStore.error"
         :dismissible="true"
-        @dismiss="subscriptionStore.clearError"
+        @dismiss="() => subscriptionStore.clearError()"
       />
 
       <!-- Page Header -->
@@ -336,9 +333,9 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
                 billingPeriod: selectedBillingPeriod,
                 tier: selectedPlan.tier
               }"
-              @payment-success="handlePaymentSuccess"
-              @payment-error="handlePaymentError"
-              @payment-closed="handlePaymentClosed"
+              @success="handlePaymentSuccess"
+              @error="handlePaymentError"
+              @closed="handlePaymentClosed"
             />
           </div>
         </div>

@@ -63,7 +63,7 @@ const handleStartMessage = () => {
   
   if (!canMessage.value) {
     const restrictions = messagingStore.getConversationRestrictions()
-    showError(`You cannot initiate conversations with ${props.receiverRole}s. ${restrictions.description}`)
+    showError(`You cannot initiate conversations with ${props.receiverRole}s. ${(restrictions as any).description || ''}`)
     return
   }
   

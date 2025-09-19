@@ -188,7 +188,7 @@ class PresenceService {
         queries
       )
 
-      return response.documents as UserPresence[]
+      return response.documents as unknown as UserPresence[]
     } catch (error) {
       console.error('Failed to get users presence:', error)
       return []

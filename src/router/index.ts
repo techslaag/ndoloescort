@@ -157,12 +157,6 @@ const routes: Array<RouteRecordRaw> = [
     meta: { requiresAuth: true, feature: 'notifications' }
   },
   {
-    path: '/test/city-dropdown',
-    name: 'TestCityDropdown',
-    component: () => import('../components/test/TestCityDropdown.vue'),
-    meta: { requiresAuth: false }
-  },
-  {
     path: '/escort/settings',
     name: 'EscortSettings',
     component: () => import('../views/Settings.vue'),
@@ -227,11 +221,6 @@ const routes: Array<RouteRecordRaw> = [
     name: 'EscortAdvertising',
     component: () => import('../views/escort/Advertising.vue'),
     meta: { requiresAuth: true, requiresEscort: true }
-  },
-  {
-    path: '/auth-test',
-    name: 'AuthTest',
-    component: () => import('../views/AuthTest.vue')
   },
   {
     path: '/:pathMatch(.*)*',

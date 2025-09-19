@@ -19,7 +19,7 @@ const emit = defineEmits<Emits>()
 const callDuration = ref(0)
 const isMuted = ref(false)
 const isVideoEnabled = ref(true)
-const callTimer = ref<number | null>(null)
+const callTimer = ref<ReturnType<typeof setInterval> | null>(null)
 
 const formatDuration = (seconds: number): string => {
   const mins = Math.floor(seconds / 60)

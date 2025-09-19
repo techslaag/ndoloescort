@@ -1,7 +1,7 @@
 import { account, databases, DATABASE_ID, AUTH_SESSIONS_COLLECTION_ID, LOGIN_ATTEMPTS_COLLECTION_ID, SECURITY_EVENTS_COLLECTION_ID } from '../lib/appwrite'
 import { ID, Query, AuthenticationFactor, AuthenticatorType } from 'appwrite'
 import { encryptedStorageAdapter } from '../lib/encryption'
-import CryptoJS from 'crypto-js'
+import * as CryptoJS from 'crypto-js'
 import { notificationService } from './notificationService'
 
 export interface SecurityEvent {
@@ -91,6 +91,8 @@ export class AuthEnhancementService {
     requiresMFA?: boolean
     error?: string
     securityWarnings?: string[]
+    challengeId?: string
+    message?: string
   }> {
     const ipAddress = await this.getClientIP()
     const userAgent = navigator.userAgent

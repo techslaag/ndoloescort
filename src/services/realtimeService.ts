@@ -373,9 +373,8 @@ class RealtimeService {
         body,
         icon: '/icon-192x192.png',
         badge: '/icon-192x192.png',
-        tag: 'elitecompanions-message',
-        renotify: true
-      })
+        tag: 'elitecompanions-message'
+      } as any)
     } else if (Notification.permission !== 'denied') {
       // Request permission
       Notification.requestPermission().then(permission => {
@@ -397,12 +396,8 @@ class RealtimeService {
         icon: '/icon-192x192.png',
         badge: '/icon-192x192.png',
         tag: `call-${call.$id}`,
-        requireInteraction: true,
-        actions: [
-          { action: 'answer', title: 'Answer' },
-          { action: 'decline', title: 'Decline' }
-        ]
-      })
+        requireInteraction: true
+      } as any)
       
       notification.onclick = () => {
         // Handle answer
@@ -417,7 +412,10 @@ class RealtimeService {
     try {
       const audio = new Audio('/sounds/notification.mp3')
       audio.volume = 0.5
-      audio.play().catch(console.error)
+      const playPromise = audio.play()
+      if (playPromise) {
+        playPromise.catch(console.error)
+      }
     } catch (error) {
       console.error('Failed to play notification sound:', error)
     }
@@ -429,7 +427,10 @@ class RealtimeService {
       const audio = new Audio('/sounds/ringtone.mp3')
       audio.volume = 0.7
       audio.loop = true
-      audio.play().catch(console.error)
+      const playPromise = audio.play()
+      if (playPromise) {
+        playPromise.catch(console.error)
+      }
       
       // Store audio instance to stop later
       (window as any).__ringtoneAudio = audio

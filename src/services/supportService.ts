@@ -80,7 +80,7 @@ export class SupportService {
         userId: authStore.user.$id,
         userEmail: authStore.user.email,
         userName: authStore.user.name || 'User',
-        userType: authStore.user.prefs?.userType || 'client',
+        userType: (authStore.user.prefs as any)?.userType || 'client',
         subscriptionTier: subscriptionStore.currentSubscription?.tier || 'free',
         isPriority,
         subject,
@@ -93,7 +93,7 @@ export class SupportService {
         DATABASE_ID,
         SUPPORT_TICKETS_COLLECTION_ID,
         ID.unique(),
-        ticketData
+        ticketData as any
       )
 
       // Create initial message
@@ -102,9 +102,9 @@ export class SupportService {
       }
 
       // Send notification to support team
-      await this.notifySupportTeam(ticket as SupportTicket)
+      await this.notifySupportTeam(ticket as unknown as SupportTicket)
 
-      return ticket as SupportTicket
+      return ticket as unknown as SupportTicket
     } catch (error) {
       console.error('Failed to create support ticket:', error)
       return null
@@ -139,7 +139,7 @@ export class SupportService {
         DATABASE_ID,
         SUPPORT_MESSAGES_COLLECTION_ID,
         ID.unique(),
-        messageData
+        messageData as any
       )
 
       // Update ticket status if support is responding
@@ -167,7 +167,7 @@ export class SupportService {
         )
       }
 
-      return created as SupportMessage
+      return created as unknown as SupportMessage
     } catch (error) {
       console.error('Failed to add support message:', error)
       return null
@@ -195,7 +195,7 @@ export class SupportService {
         queries
       )
 
-      return response.documents as SupportTicket[]
+      return response.documents as unknown as SupportTicket[]
     } catch (error) {
       console.error('Failed to get user tickets:', error)
       return []
@@ -216,13 +216,13 @@ export class SupportService {
 
       // Filter out internal messages for non-support users
       const authStore = useAuthStore()
-      const isSupport = authStore.user?.prefs?.isSupport || false
+      const isSupport = (authStore.user?.prefs as any)?.isSupport || false
 
       if (!isSupport) {
-        return response.documents.filter((msg: any) => !msg.isInternal) as SupportMessage[]
+        return response.documents.filter((msg: any) => !msg.isInternal) as unknown as SupportMessage[]
       }
 
-      return response.documents as SupportMessage[]
+      return response.documents as unknown as SupportMessage[]
     } catch (error) {
       console.error('Failed to get ticket messages:', error)
       return []
@@ -272,7 +272,7 @@ export class SupportService {
         [...queries, Query.limit(1000)]
       )
 
-      const tickets = response.documents as SupportTicket[]
+      const tickets = response.documents as unknown as SupportTicket[]
       const now = new Date()
       const thisMonth = now.getMonth()
       const thisYear = now.getFullYear()

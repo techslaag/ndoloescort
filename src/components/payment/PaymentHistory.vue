@@ -27,7 +27,7 @@ const selectedFilter = ref<'all' | 'booking' | 'subscription' | 'advertising' | 
 const selectedStatus = ref<'all' | 'completed' | 'pending' | 'failed' | 'refunded'>('all')
 
 // Computed
-const userRole = computed(() => authStore.user?.prefs?.userType || 'client')
+const userRole = computed(() => (authStore.user?.prefs as any)?.userType || 'client')
 
 const filteredTransactions = computed(() => {
   let filtered = [...transactions.value]
@@ -245,7 +245,7 @@ defineExpose({
         
         <div class="transaction-details">
           <div class="transaction-header">
-            <h4>{{ transaction.description || `${transaction.type} payment` }}</h4>
+            <h4>{{ (transaction as any).description || `${transaction.type} payment` }}</h4>
             <span class="transaction-amount" :class="{ 'earned': userRole === 'escort' && transaction.type === 'booking' }">
               {{ formatAmount(transaction.amount) }}
             </span>

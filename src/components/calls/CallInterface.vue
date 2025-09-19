@@ -20,9 +20,7 @@ const emit = defineEmits<{
   'error': [error: Error]
 }>()
 
-const messagingStore = useMessagingStore()
 const authStore = useAuthStore()
-const subscriptionStore = useSubscriptionStore()
 
 // UI state
 const isMuted = ref(false)
@@ -308,7 +306,7 @@ onUnmounted(async () => {
     class="call-interface"
     :class="{ 
       'video-call': call.type === 'video',
-      'audio-call': call.type === 'audio',
+      'audio-call': call.type === 'voice',
       'controls-hidden': !showControls
     }"
     @mousemove="showControlsTemporarily"

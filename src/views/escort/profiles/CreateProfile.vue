@@ -88,10 +88,7 @@ const steps = computed(() => [
   }
 ])
 
-const profileCompletion = computed(() => {
-  const completedSteps = steps.value.filter(step => step.isComplete).length
-  return Math.round((completedSteps / totalSteps) * 100)
-})
+// profileCompletion removed - not used, replaced by detailedCompletion
 
 const detailedCompletion = computed(() => {
   const stepStatuses = []
@@ -200,12 +197,12 @@ const loadProfile = async () => {
   try {
     isLoading.value = true
     const fetchedProfile = await profileStore.fetchProfile(profileId.value)
-    profile.value = fetchedProfile || profileStore.profiles.find(p => p.id === profileId.value || (p as any).$id === profileId.value)
+    profile.value = fetchedProfile || profileStore.profiles.find((p: any) => p.id === profileId.value)
     
     console.log('CreateProfile: Fetched profile data:', {
       profileId: profileId.value,
       fetchedProfile,
-      foundInStore: profileStore.profiles.find(p => p.id === profileId.value || (p as any).$id === profileId.value),
+      foundInStore: profileStore.profiles.find((p: any) => p.id === profileId.value),
       allKeys: profile.value ? Object.keys(profile.value) : 'NO PROFILE'
     })
     
@@ -551,9 +548,8 @@ const saveAsDraft = async () => {
     if (selectedServices.value.length > 0 && draftProfileId.value) {
       // First delete existing services for this profile
       try {
-        const profile = profileStore.profiles.find(p => {
-          const pId = (p as any).$id || (p as any).id
-          return pId === draftProfileId.value
+        const profile = profileStore.profiles.find((p: any) => {
+          return p.id === draftProfileId.value
         })
         if (profile?.services && profile.services.length > 0) {
           for (const service of profile.services) {
@@ -580,9 +576,8 @@ const saveAsDraft = async () => {
     if (draftProfileId.value) {
       // First delete existing pricing for this profile
       try {
-        const profile = profileStore.profiles.find(p => {
-          const pId = (p as any).$id || (p as any).id
-          return pId === draftProfileId.value
+        const profile = profileStore.profiles.find((p: any) => {
+          return p.id === draftProfileId.value
         })
         if (profile?.pricing && profile.pricing.length > 0) {
           for (const pricing of profile.pricing) {
@@ -661,9 +656,8 @@ const publishProfile = async () => {
     
     // Get the complete profile data for validation
     await profileStore.fetchProfile(draftProfileId.value)
-    const profile = profileStore.profiles.find(p => {
-      const pId = (p as any).$id || (p as any).id
-      return pId === draftProfileId.value
+    const profile = profileStore.profiles.find((p: any) => {
+      return p.id === draftProfileId.value
     })
     
     if (!profile) {
@@ -717,14 +711,11 @@ const closeActivationModal = () => {
 const currentProfileForModal = computed(() => {
   if (!draftProfileId.value) return {}
   
-  const profile = profileStore.profiles.find(p => p.id === draftProfileId.value)
+  const profile = profileStore.profiles.find((p: any) => p.id === draftProfileId.value)
   return profile || {}
 })
 
-// Force location dropdowns to re-render when profile is loaded
-const locationKey = computed(() => {
-  return `${initialDataLoaded.value}-${form.location.city}-${form.location.country}`
-})
+// locationKey removed - was unused
 
 // Watch for location changes and sync with flat structure
 watch(() => form.location, (newLocation) => {

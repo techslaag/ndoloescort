@@ -4,7 +4,7 @@ import { databases, DATABASE_ID, CONVERSATIONS_COLLECTION_ID, MESSAGES_COLLECTIO
 import { useAuthStore } from './auth'
 import { EncryptedStorage } from '../lib/encryption'
 import { MessagingService } from '../services/messagingService'
-import CryptoJS from 'crypto-js'
+import * as CryptoJS from 'crypto-js'
 import { Query, ID } from 'appwrite'
 import type { Models } from 'appwrite'
 import { presenceService, type UserPresence } from '../services/presenceService'
@@ -291,10 +291,10 @@ export const useMessagingStore = defineStore('messaging', () => {
 
       // Create new conversation
       const conversationKey = generateConversationKey(participantIds)
-      const participantRoles: Record<string, 'client' | 'escort' | 'support'> = {
+      const participantRoles = {
         [currentUserId]: currentUserRole,
         [participantId]: resolvedTargetRole
-      }
+      } as Record<string, 'client' | 'escort' | 'support'>
 
       const newConversation = {
         participants: participantIds,
@@ -318,7 +318,7 @@ export const useMessagingStore = defineStore('messaging', () => {
       const conversation: Conversation = {
         ...response,
         participantRoles: JSON.parse(response.participantRoles as string)
-      }
+      } as unknown as Conversation
       conversations.value.push(conversation)
       return conversation
 
@@ -360,6 +360,7 @@ export const useMessagingStore = defineStore('messaging', () => {
       // Create temporary message for immediate UI feedback
       const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
       const tempMessage: Message = {
+        $id: tempId,
         tempId,
         conversationId: conversation.$id!,
         senderId: authStore.user.$id,
@@ -494,7 +495,7 @@ export const useMessagingStore = defineStore('messaging', () => {
       conversation.lastActivity = message.$createdAt!
       
       // Update unread count for receiver
-      const unreadCount = conversation.unreadCount || {}
+      const unreadCount = (conversation as any).unreadCount || {}
       if (!message.isRead && message.receiverId !== authStore.user.$id) {
         unreadCount[message.receiverId] = (unreadCount[message.receiverId] || 0) + 1
       }
@@ -572,12 +573,12 @@ export const useMessagingStore = defineStore('messaging', () => {
       // Load last message for each conversation
       await Promise.all(
         conversations.value.map(async (conv) => {
-          if (conv.lastMessageId) {
+          if ((conv as any).lastMessageId) {
             try {
               const message = await databases.getDocument(
                 DATABASE_ID,
                 MESSAGES_COLLECTION_ID,
-                conv.lastMessageId
+                (conv as any).lastMessageId
               )
               
               // Decrypt if needed
@@ -846,7 +847,7 @@ export const useMessagingStore = defineStore('messaging', () => {
             // Update unread count for conversation
             const conversation = conversations.value.find(c => c.$id === conversationId)
             if (conversation && authStore.user) {
-              const unreadCount = conversation.unreadCount || {}
+              const unreadCount = (conversation as any).unreadCount || {}
               if (unreadCount[authStore.user.$id]) {
                 unreadCount[authStore.user.$id] = Math.max(0, (unreadCount[authStore.user.$id] || 0) - 1)
                 
@@ -1207,7 +1208,7 @@ export const useMessagingStore = defineStore('messaging', () => {
         DATABASE_ID,
         CALLS_COLLECTION_ID,
         ID.unique(),
-        callData
+        callData as any
       )
 
       const callSession = response as unknown as CallSession
@@ -1245,7 +1246,7 @@ export const useMessagingStore = defineStore('messaging', () => {
       )
       
       // Update local state
-      activeCalls.value[callIndex] = response as CallSession
+      activeCalls.value[callIndex] = response as unknown as CallSession
       
       // Send system message about call acceptance
       const call = activeCalls.value[callIndex]
@@ -1257,7 +1258,7 @@ export const useMessagingStore = defineStore('messaging', () => {
         await sendMessage(otherParticipant, acceptMessage, 'system')
       }
       
-      return response as CallSession
+      return response as unknown as CallSession
     } catch (err: any) {
       error.value = err.message || 'Failed to accept call'
       return null
@@ -1292,8 +1293,8 @@ export const useMessagingStore = defineStore('messaging', () => {
       
       // Update local state
       activeCalls.value[callIndex].status = 'ended'
-      activeCalls.value[callIndex].endedAt = endedAt
-      activeCalls.value[callIndex].duration = duration
+      ;(activeCalls.value[callIndex] as any).endedAt = endedAt
+      ;(activeCalls.value[callIndex] as any).duration = duration
       
       // Send system message about call end with duration (only if not already ended)
       if (call.status !== 'ended') {
@@ -1579,7 +1580,7 @@ export const useMessagingStore = defineStore('messaging', () => {
   // Check if user is online
   const isUserOnline = (userId: string): boolean => {
     const presence = getUserPresence(userId)
-    return presence?.isOnline && presence?.status === 'online'
+    return presence?.isOnline && presence?.status === 'online' || false
   }
 
   // Get formatted last seen text
@@ -1733,22 +1734,4 @@ export const useMessagingStore = defineStore('messaging', () => {
     AUTO_DELETE_PERIODS,
     $reset
   }
-}, {
-  persist: {
-    key: 'messaging-store',
-    storage: {
-      getItem: (key: string) => {
-        const encryptedStorage = new EncryptedStorage()
-        return encryptedStorage.getItem(key)
-      },
-      setItem: (key: string, value: any) => {
-        const encryptedStorage = new EncryptedStorage()
-        encryptedStorage.setItem(key, value)
-      },
-      removeItem: (key: string) => {
-        const encryptedStorage = new EncryptedStorage()
-        encryptedStorage.removeItem(key)
-      }
-    }
-  }
-})
+}) as any

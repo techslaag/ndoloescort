@@ -206,7 +206,7 @@ const filteredCities = computed(() => {
     relevantCities = cities.value.filter(city => 
       city.country_id === selectedCountry.value!.id
     )
-    console.log('LocationDropdowns: Found', relevantCities.length, 'cities for country', selectedCountry.value.name)
+    console.log('LocationDropdowns: Found', relevantCities.length, 'cities for country', selectedCountry.value!.name)
   }
   
   if (!citySearch.value) {

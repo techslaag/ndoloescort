@@ -21,7 +21,8 @@ const progressData = computed(() => {
       current: 0,
       required: 1,
       percentage: 0,
-      isEligible: false
+      isEligible: false,
+      nextMilestone: undefined
     }
   }
   return props.progress

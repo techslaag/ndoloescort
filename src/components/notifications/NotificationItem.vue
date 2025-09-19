@@ -15,6 +15,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   click: [notificationId: string]
   delete: [notificationId: string]
+  action: [actionName: string]
 }>()
 
 const router = useRouter()

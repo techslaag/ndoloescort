@@ -40,7 +40,7 @@ export const useProfileStore = defineStore('profile', () => {
 
   const boostedProfiles = computed(() => {
     return profiles.value.filter(profile => {
-      const profileId = profile.$id || profile.id
+      const profileId = profile.id
       const ads = profileAdvertising.value[profileId] || []
       return ads.some(ad => {
         const now = new Date()
@@ -267,7 +267,7 @@ export const useProfileStore = defineStore('profile', () => {
       }
       
       const currentId = (currentProfile.value as any)?.$id || (currentProfile.value as any)?.id
-      if (currentId === profileId) {
+      if (currentId === profileId && currentProfile.value) {
         currentProfile.value.services.push(newService)
       }
       
@@ -320,7 +320,7 @@ export const useProfileStore = defineStore('profile', () => {
       }
       
       const currentId = (currentProfile.value as any)?.$id || (currentProfile.value as any)?.id
-      if (currentId === profileId) {
+      if (currentId === profileId && currentProfile.value) {
         currentProfile.value.services = currentProfile.value.services.filter(s => s.id !== serviceId)
       }
     } catch (err: any) {
@@ -345,7 +345,7 @@ export const useProfileStore = defineStore('profile', () => {
       }
       
       const currentId = (currentProfile.value as any)?.$id || (currentProfile.value as any)?.id
-      if (currentId === profileId) {
+      if (currentId === profileId && currentProfile.value) {
         currentProfile.value.pricing.push(newPricing)
       }
       
@@ -433,7 +433,7 @@ export const useProfileStore = defineStore('profile', () => {
         profile.media.push(newMedia)
       }
       
-      if (currentProfile.value?.id === profileId) {
+      if (currentProfile.value?.id === profileId && currentProfile.value) {
         currentProfile.value.media.push(newMedia)
       }
       
@@ -456,7 +456,7 @@ export const useProfileStore = defineStore('profile', () => {
         profile.media = profile.media.filter(m => m.id !== mediaId)
       }
       
-      if (currentProfile.value?.id === profileId) {
+      if (currentProfile.value?.id === profileId && currentProfile.value) {
         currentProfile.value.media = currentProfile.value.media.filter(m => m.id !== mediaId)
       }
     } catch (err: any) {
@@ -480,7 +480,7 @@ export const useProfileStore = defineStore('profile', () => {
         profile.availability.schedule.push(...events)
       }
       
-      if (currentProfile.value?.id === profileId) {
+      if (currentProfile.value?.id === profileId && currentProfile.value) {
         currentProfile.value.availability.schedule = currentProfile.value.availability.schedule.filter(e => e.date !== date)
         currentProfile.value.availability.schedule.push(...events)
       }
@@ -513,7 +513,7 @@ export const useProfileStore = defineStore('profile', () => {
         profile.availability.schedule.push(event)
       }
       
-      if (currentProfile.value?.id === profileId) {
+      if (currentProfile.value?.id === profileId && currentProfile.value) {
         currentProfile.value.availability.schedule.push(event)
       }
       
@@ -535,7 +535,7 @@ export const useProfileStore = defineStore('profile', () => {
         profile.stats.views++
       }
       
-      if (currentProfile.value?.id === profileId) {
+      if (currentProfile.value?.id === profileId && currentProfile.value) {
         currentProfile.value.stats.views++
       }
     } catch (err: any) {
@@ -586,7 +586,7 @@ export const useProfileStore = defineStore('profile', () => {
   async function refreshAdvertisingData() {
     try {
       for (const profile of profiles.value) {
-        const profileId = profile.$id || profile.id
+        const profileId = profile.id
         await loadProfileAdvertising(profileId)
       }
     } catch (err: any) {
@@ -652,9 +652,4 @@ export const useProfileStore = defineStore('profile', () => {
     isProfileBoosted,
     getProfileBoostType
   }
-}, {
-  persist: {
-    key: 'profile-store',
-    pick: ['profiles', 'currentProfile', 'profileAdvertising']
-  }
-})
+}) as any

@@ -139,9 +139,9 @@ export const useEscortStore = defineStore('escort', () => {
     total: escorts.value.length,
     featured: featuredEscorts.value.length,
     averageRating: escorts.value.reduce((sum, e) => sum + e.rating, 0) / escorts.value.length || 0,
-    locations: [...new Set(escorts.value.map(e => e.location))],
-    services: [...new Set(escorts.value.flatMap(e => e.services))],
-    languages: [...new Set(escorts.value.flatMap(e => e.languages))]
+    locations: Array.from(new Set(escorts.value.map(e => e.location))),
+    services: Array.from(new Set(escorts.value.flatMap(e => e.services))),
+    languages: Array.from(new Set(escorts.value.flatMap(e => e.languages)))
   }))
 
   const favoriteEscortDetails = computed(() => 
@@ -527,9 +527,4 @@ export const useEscortStore = defineStore('escort', () => {
     initialize,
     reset
   }
-}, {
-  persist: {
-    key: 'escort-store',
-    paths: ['favoriteEscorts', 'recentlyViewed', 'searchFilters', 'sortOptions']
-  }
-})
+}) as any

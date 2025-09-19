@@ -72,12 +72,16 @@ export class AgoraService {
     this.client.on('user-published', async (user, mediaType) => {
       console.log('User published:', user.uid, mediaType)
       await this.client!.subscribe(user, mediaType)
-      this.onUserPublished?.(user, mediaType)
+      if (mediaType !== 'datachannel') {
+        this.onUserPublished?.(user, mediaType)
+      }
     })
 
     this.client.on('user-unpublished', (user, mediaType) => {
       console.log('User unpublished:', user.uid, mediaType)
-      this.onUserUnpublished?.(user, mediaType)
+      if (mediaType !== 'datachannel') {
+        this.onUserUnpublished?.(user, mediaType)
+      }
     })
 
     // Connection state
@@ -100,9 +104,11 @@ export class AgoraService {
     })
 
     // Errors
-    this.client.on('error', (error) => {
+    this.client.on('error', (error: any) => {
       console.error('Agora error:', error)
-      this.onError?.(error)
+      // Convert to Error if needed for callback compatibility
+      const errorObj = error instanceof Error ? error : new Error(String(error))
+      this.onError?.(errorObj)
     })
   }
 
@@ -256,8 +262,8 @@ export class AgoraService {
       duration: stats.Duration,
       sendBitrate: (localAudioStats?.sendBitrate || 0) + (localVideoStats?.sendBitrate || 0),
       recvBitrate: stats.RecvBitrate,
-      sendPacketLossRate: localAudioStats?.sendPacketLossRate || 0,
-      recvPacketLossRate: stats.RecvPacketLossRate,
+      sendPacketLossRate: localAudioStats?.sendPacketsLost || 0,
+      recvPacketLossRate: (stats as any).RecvPacketLossRate || 0,
       networkQuality: 'good' // Will be updated by network-quality event
     }
   }
