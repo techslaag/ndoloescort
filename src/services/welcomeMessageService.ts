@@ -54,7 +54,7 @@ export class WelcomeMessageService {
   static async sendWelcomeMessage(conversationId: string, userId: string, userType: 'client' | 'escort'): Promise<void> {
     try {
       const welcomeContent = userType === 'client' 
-        ? `Welcome to NdoloEscorts! 🎉
+        ? `Welcome to Escorts Prime! 🎉
 
 We're thrilled to have you join our exclusive community. Here's what you can do:
 
@@ -68,10 +68,10 @@ Your privacy and safety are our top priorities. All communications are encrypted
 If you need any assistance, don't hesitate to reach out. We're here to help!
 
 Best regards,
-The NdoloEscorts Support Team`
-        : `Welcome to NdoloEscorts! 🎉
+The Escorts Prime Support Team`
+        : `Welcome to Escorts Prime! 🎉
 
-Congratulations on joining our exclusive network of elite companions. Here's how to get started:
+Congratulations on joining our exclusive network of sscorts prime. Here's how to get started:
 
 • Complete your profile to attract more clients
 • Upload high-quality photos (you can blur them for privacy)
@@ -88,7 +88,7 @@ Tips for success:
 We're here to support your success. If you have any questions about using the platform, feel free to ask!
 
 Best regards,
-The NdoloEscorts Support Team`
+The Escorts Prime Support Team`
 
       await databases.createDocument(
         DATABASE_ID,

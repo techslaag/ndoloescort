@@ -360,7 +360,7 @@ const navigateToContact = () => {
           
           <div class="contact-info">
             <div class="contact-method">
-              <strong>Email:</strong> legal@elitecompanions.com
+              <strong>Email:</strong> legal@escortsprime.com
             </div>
             <div class="contact-method">
               <strong>Phone:</strong> +1 (555) 123-4567

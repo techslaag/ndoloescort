@@ -159,7 +159,7 @@ const submitForm = async () => {
               <div class="method-icon">📧</div>
               <div class="method-content">
                 <h3>Email</h3>
-                <p>info@elitecompanions.com</p>
+                <p>info@escortsprime.com</p>
                 <p class="method-note">Response within 24 hours</p>
               </div>
             </div>

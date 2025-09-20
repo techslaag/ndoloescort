@@ -116,7 +116,7 @@ class FlutterwaveService {
       payment_options: 'card,account,ussd,qr,mpesa,mobilemoneyghana,mobilemoneyfranco,mobilemoneyuganda,mobilemoneyrwanda,mobilemoneyzambia,mobilemoneytanzania,barter,bank-transfer,credit',
       redirect_url: '',
       customizations: {
-        title: 'NdoloEscorts',
+        title: 'Escorts Prime',
         description: data.description,
         logo: window.location.origin + '/logo.png'
       },
@@ -165,7 +165,7 @@ class FlutterwaveService {
   ): Promise<string> {
     try {
       // Calculate net amount (after platform fees)
-      const platformFeeRate = 0.20 // 20% platform fee
+      const platformFeeRate = 0.0 // 20% platform fee
       const platformFee = Math.round(config.amount * platformFeeRate)
       const netAmount = config.amount - platformFee
       

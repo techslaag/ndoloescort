@@ -1,0 +1,13 @@
+{
+  "name": "flutterwave-payment",
+  "version": "1.0.0",
+  "description": "Flutterwave payment processing function",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "node-appwrite": "^11.0.0"
+  }
+}

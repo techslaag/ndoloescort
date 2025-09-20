@@ -373,7 +373,7 @@ class RealtimeService {
         body,
         icon: '/icon-192x192.png',
         badge: '/icon-192x192.png',
-        tag: 'elitecompanions-message'
+        tag: 'escortsprime-message'
       } as any)
     } else if (Notification.permission !== 'denied') {
       // Request permission

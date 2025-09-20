@@ -104,7 +104,7 @@ const companions = [
         <div class="logo-section">
           <div class="logo">
             <img src="/src/assets/images/logo/logo.svg" alt="Elite Companions Logo" class="logo-image">
-            <span class="logo-text">Elite Companions</span>
+            <span class="logo-text">Escorts Prime</span>
           </div>
         </div>
         

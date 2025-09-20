@@ -162,7 +162,7 @@ const toggleQuestion = (questionId: number) => {
               <div class="contact-icon">📧</div>
               <div class="contact-info">
                 <h3>Email Support</h3>
-                <p>info@elitecompanions.com</p>
+                <p>info@escortsprime.com</p>
                 <span class="response-time">Response within 24 hours</span>
               </div>
             </div>

@@ -28,8 +28,8 @@ onMounted(() => {
     <div class="container footer-content">
       <div class="footer-logo">
         <h2>
-          <span class="logo-text">Ndolo</span>
-          <span class="logo-accent">Escorts</span>
+          <span class="logo-text">Escorts</span>
+          <span class="logo-accent">Prime</span>
         </h2>
         <p class="tagline">Premium companion services for discerning clients</p>
       </div>
@@ -71,7 +71,7 @@ onMounted(() => {
       <div class="container">
         <div class="footer-bottom-content">
           <div class="footer-bottom-left">
-            <p>&copy; {{ currentYear }} Elite Companions. All rights reserved.</p>
+            <p>&copy; {{ currentYear }} Escorts Prime. All rights reserved.</p>
             <p class="legal-disclaimer">This platform is intended for adults aged 21+ for entertainment and companion services only. All content and services comply with local laws and regulations.</p>
           </div>
           <div class="footer-bottom-right">

@@ -68,8 +68,8 @@ const onLocationConfirmed = () => {
     
     <div v-if="isLoading" class="loading-screen">
       <div class="loading-logo">
-        <span>Ndolo</span>
-        <span class="accent">Escorts</span>
+        <span>Escorts</span>
+        <span class="accent">Prime</span>
       </div>
       <div class="loading-spinner"></div>
     </div>

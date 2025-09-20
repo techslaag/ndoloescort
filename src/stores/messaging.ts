@@ -2,11 +2,9 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { databases, DATABASE_ID, CONVERSATIONS_COLLECTION_ID, MESSAGES_COLLECTION_ID, CALLS_COLLECTION_ID, SUPPORT_USER_ID } from '../lib/appwrite'
 import { useAuthStore } from './auth'
-import { EncryptedStorage } from '../lib/encryption'
 import { MessagingService } from '../services/messagingService'
 import * as CryptoJS from 'crypto-js'
 import { Query, ID } from 'appwrite'
-import type { Models } from 'appwrite'
 import { presenceService, type UserPresence } from '../services/presenceService'
 import { notificationService } from '../services/notificationService'
 
@@ -91,7 +89,6 @@ export const useMessagingStore = defineStore('messaging', () => {
   let presenceUnsubscribe: (() => void) | null = null
 
   const authStore = useAuthStore()
-  const encryptedStorage = new EncryptedStorage()
 
   // Generate encryption key for a conversation
   const generateConversationKey = (participantIds: string[]): string => {
@@ -99,7 +96,7 @@ export const useMessagingStore = defineStore('messaging', () => {
     // This ensures both participants generate the same key
     const sortedIds = participantIds.sort().join('-')
     // Add a static salt for additional security
-    const salt = 'EliteCompanions-E2E-Encryption-2024'
+    const salt = 'EscortsPrime-E2E-Encryption-2024'
     return CryptoJS.SHA256(sortedIds + salt).toString()
   }
 
@@ -160,7 +157,7 @@ export const useMessagingStore = defineStore('messaging', () => {
     }
     
     // Check if user is support (special support user ID or email domain)
-    if (user?.email?.endsWith('@support.elitecompanions.com') || user?.$id === SUPPORT_USER_ID) {
+    if (user?.email?.endsWith('@support.escortsprime.com') || user?.$id === SUPPORT_USER_ID) {
       return 'support'
     }
     

@@ -5,7 +5,7 @@ import { useSubscriptionStore } from '../stores/subscription'
 import { useAuthStore } from '../stores/auth'
 import { SUBSCRIPTION_PLANS, type SubscriptionPlan, type BillingPeriod } from '../types/subscription'
 import { formatCurrency, getCurrencySymbol, getUserCurrency, convertFromUSD } from '../utils/currency'
-import FlutterwavePayment from '../components/payment/FlutterwavePayment.vue'
+import FlutterwaveApiPayment from '../components/payment/FlutterwaveApiPayment.vue'
 import ErrorAlert from '../components/ErrorAlert.vue'
 
 const router = useRouter()
@@ -20,7 +20,7 @@ const showCancelModal = ref(false)
 const cancellationReason = ref('')
 const showUpgradeModal = ref(false)
 const upgradePlan = ref<SubscriptionPlan | null>(null)
-const paymentRef = ref<InstanceType<typeof FlutterwavePayment>>()
+const paymentRef = ref<InstanceType<typeof FlutterwaveApiPayment>>()
 
 const plans = computed(() => SUBSCRIPTION_PLANS)
 const currentSubscription = computed(() => subscriptionStore.currentSubscription)
@@ -358,7 +358,7 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
           </div>
           
           <div class="payment-form-section">
-            <FlutterwavePayment
+            <FlutterwaveApiPayment
               ref="paymentRef"
               :amount="getPrice(selectedPlan)"
               :currency="userCurrency"

@@ -1,0 +1,36 @@
+{
+  "projectId": "68874aa60018d306519d",
+  "projectName": "EliteCompanions",
+  "functions": [
+    {
+      "$id": "markMessageAsRead",
+      "name": "Mark Message As Read",
+      "runtime": "node-18.0",
+      "path": "functions/markMessageAsRead",
+      "entrypoint": "index.js",
+      "ignore": [
+        "node_modules"
+      ],
+      "execute": ["any"],
+      "events": [],
+      "schedule": "",
+      "timeout": 15
+    },
+    {
+      "$id": "flutterwave-payment",
+      "name": "Flutterwave Payment",
+      "runtime": "node-18.0",
+      "path": "functions/flutterwave-payment",
+      "entrypoint": "index.js",
+      "ignore": [
+        "node_modules",
+        ".npm"
+      ],
+      "execute": ["any"],
+      "events": [],
+      "schedule": "",
+      "timeout": 30,
+      "commands": "npm install"
+    }
+  ]
+}

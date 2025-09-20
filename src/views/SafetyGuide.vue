@@ -307,7 +307,7 @@ const emergencyNumber = '+1 (555) 911-HELP'
                 <h3>Non-Emergency Support</h3>
                 <p>For general concerns or questions:</p>
                 <div class="contact-details">
-                  <strong>Support Email:</strong> support@elitecompanions.com<br>
+                  <strong>Support Email:</strong> support@escortsprime.com<br>
                   <strong>Live Chat:</strong> Available on our website<br>
                   <strong>Response Time:</strong> Within 2 hours
                 </div>
@@ -320,7 +320,7 @@ const emergencyNumber = '+1 (555) 911-HELP'
                 <h3>Incident Reporting</h3>
                 <p>To report safety incidents or concerns:</p>
                 <div class="contact-details">
-                  <strong>Incident Email:</strong> incidents@elitecompanions.com<br>
+                  <strong>Incident Email:</strong> incidents@escortsprime.com<br>
                   <strong>Anonymous Tip Line:</strong> Available on website<br>
                   <strong>Follow-up:</strong> Within 24 hours
                 </div>

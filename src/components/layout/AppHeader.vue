@@ -250,8 +250,8 @@ onUnmounted(() => {
     <div class="container header-container">
       <div class="logo-container" @click="navigateTo('/')">
         <h1 class="logo">
-          <span class="logo-text">Ndolo</span>
-          <span class="logo-accent">Escorts</span>
+          <span class="logo-text">Escorts</span>
+          <span class="logo-accent">Prime</span>
         </h1>
       </div>
       
