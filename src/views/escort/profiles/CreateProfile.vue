@@ -35,7 +35,8 @@ const uploadedFiles = ref<Array<{
   preview: string, 
   blur: boolean,
   id?: string,
-  existing?: boolean 
+  existing?: boolean,
+  type?: 'photo' | 'video'
 }>>([])
 const selectedServices = ref<string[]>([])
 const serviceDescriptions = ref<Record<string, string>>({})
@@ -287,12 +288,18 @@ const loadProfile = async () => {
     
     // Load media
     if (profile.value.media && profile.value.media.length > 0) {
+      console.log('Loading media with blur states:', profile.value.media.map((m: any) => ({
+        id: m.id || m.$id,
+        isBlurred: m.isBlurred,
+        type: m.type
+      })))
       uploadedFiles.value = profile.value.media.map((m: any) => ({
         file: null,
         preview: m.url || m.thumbnailUrl,
         blur: m.isBlurred || false,
         id: m.id || m.$id,
-        existing: true
+        existing: true,
+        type: m.type || 'photo' // 'photo' or 'video'
       }))
     }
     
@@ -331,9 +338,24 @@ onMounted(async () => {
     if (isEditMode.value) {
       await loadProfile()
     } else {
-      // Check if user can create a profile
+      // Load user's existing profiles to check limits
+      await profileStore.fetchProfiles()
+      
+      // Check if user is on free plan and already has a profile
+      if (subscriptionStore.isFreeTier && profileStore.profiles.length >= 1) {
+        authStore.setError('Free plan allows only 1 profile. Please upgrade your subscription to create more profiles.')
+        setTimeout(() => {
+          router.push('/subscription')
+        }, 3000)
+        return
+      }
+      
+      // Check general profile creation limits
       if (!subscriptionStore.canCreateProfile) {
-        authStore.setError('You have reached your monthly profile creation limit. Please upgrade your subscription to create more profiles.')
+        authStore.setError(`You have reached your monthly profile creation limit. You have ${subscriptionStore.profilesRemaining} profiles remaining this month. Please upgrade your subscription to create more profiles.`)
+        setTimeout(() => {
+          router.push('/subscription')
+        }, 3000)
         return
       }
     }
@@ -423,12 +445,31 @@ const handleFileUpload = (event: Event) => {
   
   if (!files) return
   
+  // Count existing media types
+  let existingVideos = uploadedFiles.value.filter(f => 
+    (f.type === 'video') || (f.file && f.file.type.startsWith('video/'))
+  ).length
+  let existingImages = uploadedFiles.value.filter(f => 
+    (f.type === 'photo') || (f.file && f.file.type.startsWith('image/'))
+  ).length
+  
   for (let i = 0; i < files.length; i++) {
     const file = files[i]
+    const isVideo = file.type.startsWith('video/')
+    const isImage = file.type.startsWith('image/')
+    
+    // Check media limits
+    if (isVideo && existingVideos >= 1) {
+      authStore.setError('You can only upload a maximum of 1 video')
+      continue
+    }
+    
+    if (isImage && existingImages >= 5) {
+      authStore.setError('You can only upload a maximum of 5 images')
+      continue
+    }
     
     // Validate file size (5MB limit for all file types)
-    // Note: Images and videos will have preview functionality, other files will show file info
-    
     if (file.size > 5 * 1024 * 1024) { // 5MB limit
       authStore.setError(`${file.name} is too large. Maximum size is 5MB`)
       continue
@@ -440,8 +481,13 @@ const handleFileUpload = (event: Event) => {
       uploadedFiles.value.push({
         file,
         preview: e.target?.result as string,
-        blur: false // Default to unblurred
+        blur: false, // Default to unblurred
+        type: isVideo ? 'video' : isImage ? 'photo' : undefined
       })
+      
+      // Update counts for next iteration
+      if (isVideo) existingVideos++
+      if (isImage) existingImages++
     }
     
     // Read as data URL for all file types to enable preview where possible
@@ -521,8 +567,14 @@ const saveAsDraft = async () => {
     if (draftProfileId.value || isEditMode.value) {
       // Update existing profile
       const updateId = draftProfileId.value || profileId.value!
+      console.log('Updating existing profile:', updateId)
       await profileStore.updateProfile(updateId, profileData)
       draftProfileId.value = updateId
+      
+      // Make sure profile is in edit mode if we have a profileId
+      if (profileId.value && !draftProfileId.value) {
+        draftProfileId.value = profileId.value
+      }
     } else {
       // Create new draft profile
       console.log('Creating profile with data:', profileData)
@@ -544,78 +596,87 @@ const saveAsDraft = async () => {
       }
     }
     
-    // Save services if any
-    if (selectedServices.value.length > 0 && draftProfileId.value) {
-      // First delete existing services for this profile
-      try {
-        const profile = profileStore.profiles.find((p: any) => {
-          return p.id === draftProfileId.value
-        })
-        if (profile?.services && profile.services.length > 0) {
-          for (const service of profile.services) {
-            await profileStore.removeService(service.id, draftProfileId.value)
-          }
-        }
-      } catch (error) {
-        console.error('Error removing existing services:', error)
+    // Batch save services, pricing, and media in parallel
+    if (draftProfileId.value) {
+      const batchOperations = []
+      
+      // Services - only create if we have services with descriptions
+      const servicesToCreate = selectedServices.value
+        .filter(sv => serviceDescriptions.value[sv])
+        .map(serviceValue => ({
+          name: getServiceLabel(serviceValue),
+          description: serviceDescriptions.value[serviceValue],
+          category: serviceValue
+        }))
+      
+      if (servicesToCreate.length > 0) {
+        // Create all services in parallel
+        const servicePromises = servicesToCreate.map(service =>
+          profileStore.createService(draftProfileId.value!, service)
+        )
+        batchOperations.push(...servicePromises)
       }
       
-      // Add new services
-      for (const serviceValue of selectedServices.value) {
-        if (serviceDescriptions.value[serviceValue]) {
-          await profileStore.createService(draftProfileId.value, {
-            name: getServiceLabel(serviceValue),
-            description: serviceDescriptions.value[serviceValue],
-            category: serviceValue
+      // Pricing - only create valid pricing options
+      const validPricing = form.pricing.filter(p => p.amount)
+      if (validPricing.length > 0) {
+        const pricingPromises = validPricing.map(pricing =>
+          profileStore.createPricing(draftProfileId.value!, {
+            type: pricing.type as 'hourly' | 'daily' | 'event' | 'custom',
+            amount: parseInt(pricing.amount),
+            currency: 'USD',
+            description: pricing.description || ''
           })
-        }
-      }
-    }
-    
-    // Save pricing if any
-    if (draftProfileId.value) {
-      // First delete existing pricing for this profile
-      try {
-        const profile = profileStore.profiles.find((p: any) => {
-          return p.id === draftProfileId.value
-        })
-        if (profile?.pricing && profile.pricing.length > 0) {
-          for (const pricing of profile.pricing) {
-            await profileStore.updatePricing(pricing.id, { amount: 0 }) // Mark as deleted
-          }
-        }
-      } catch (error) {
-        console.error('Error removing existing pricing:', error)
+        )
+        batchOperations.push(...pricingPromises)
       }
       
-      // Add new pricing
-      for (const pricing of form.pricing.filter(p => p.amount)) {
-        await profileStore.createPricing(draftProfileId.value, {
-          type: pricing.type as 'hourly' | 'daily' | 'event' | 'custom',
-          amount: parseInt(pricing.amount),
-          currency: 'USD',
-          description: pricing.description || ''
-        })
-      }
-    }
-    
-    // Upload media files if any
-    if (draftProfileId.value) {
-      for (const uploadedFile of uploadedFiles.value) {
-        if (!uploadedFile.existing && uploadedFile.file) {
-          await profileStore.uploadMedia(draftProfileId.value, uploadedFile.file, {
+      // Media - only upload new files
+      const newMedia = uploadedFiles.value.filter(f => !f.existing && f.file)
+      if (newMedia.length > 0) {
+        const mediaPromises = newMedia.map(uploadedFile =>
+          profileStore.uploadMedia(draftProfileId.value!, uploadedFile.file!, {
             blur: uploadedFile.blur
           })
+        )
+        batchOperations.push(...mediaPromises)
+      }
+      
+      // Execute all operations in parallel
+      if (batchOperations.length > 0) {
+        console.log(`Executing ${batchOperations.length} operations in parallel`)
+        await Promise.all(batchOperations)
+      }
+    }
+    
+    // Check if all steps are completed and auto-activate
+    if (draftProfileId.value && detailedCompletion.value.overall === 100) {
+      try {
+        const savedProfile = profileStore.profiles.find((p: any) => p.id === draftProfileId.value)
+        
+        if (savedProfile && savedProfile.status !== 'active') {
+          // Simple activation - just update the status
+          await profileStore.updateProfile(draftProfileId.value, { status: 'active' })
+          await profileStore.fetchProfiles()
+          success('Profile saved and activated successfully!')
+          authStore.clearError()
+          return
         }
+      } catch (activationError) {
+        console.log('Could not auto-activate profile:', activationError)
+        // Continue with normal save flow
       }
     }
     
     // Show success message - we'll clear the error and could show a toast/notification
     authStore.clearError()
-    console.log('Profile saved as draft successfully')
+    console.log('Profile saved successfully')
     
     // Show success message
-    success('Profile saved as draft successfully!')
+    const message = detailedCompletion.value.overall === 100 && profile.value?.status === 'active' 
+      ? 'Profile saved successfully!' 
+      : 'Profile saved as draft successfully!'
+    success(message)
   } catch (error: any) {
     console.error('Error saving draft:', error)
     console.error('Error details:', {
@@ -638,51 +699,188 @@ const saveAsDraft = async () => {
 const publishProfile = async () => {
   try {
     isLoading.value = true
+    authStore.clearError()
     
-    // Check minimum requirements
-    if (!hasMinimumRequirements()) {
-      authStore.setError('Please complete all required steps before publishing')
-      return
-    }
-    
-    // First save as draft if not already done
-    if (!draftProfileId.value) {
+    // Step 1: Check if we're updating an active profile
+    if (isEditMode.value && profile.value?.status === 'active') {
       await saveAsDraft()
-      if (!draftProfileId.value) {
-        authStore.setError('Failed to save profile. Please try again.')
-        return
+      success('Profile updated successfully!')
+      router.push('/escort/profiles')
+      return
+    }
+    
+    // Step 2: Validate completion
+    const completion = detailedCompletion.value
+    if (completion.overall < 100) {
+      const missingSteps = completion.steps
+        .filter(s => s.percentage < 100)
+        .map(s => s.step)
+        .join(', ')
+      
+      authStore.setError(`Please complete the following sections: ${missingSteps}`)
+      showError(`Profile is ${completion.overall}% complete. Please finish all required sections.`)
+      return
+    }
+    
+    // Step 3: Combine save and activate in a single operation
+    const profileIdToPublish = profileId.value || draftProfileId.value
+    
+    // Prepare all profile data including status update
+    const profileData = {
+      name: form.name || 'Untitled Profile',
+      age: form.age ? parseInt(form.age) : 18,
+      locationCity: form.location.city || form.locationCity || '',
+      locationState: form.location.state || form.locationState || '',
+      locationCountry: form.location.country || form.locationCountry || '',
+      description: form.description || '',
+      bio: form.bio || '',
+      workingHours: JSON.stringify(form.workingHours),
+      availabilityAdvanceBookingDays: 30,
+      preferencesAutoApproveBookings: form.preferences.autoApproveBookings,
+      preferencesRequireDeposit: form.preferences.requireDeposit,
+      preferencesDepositPercentage: form.preferences.requireDeposit ? parseInt(form.preferences.depositPercentage || '0') : null,
+      preferencesCancellationPolicy: form.preferences.cancellationPolicy,
+      preferencesMinimumNotice: parseInt(form.preferences.minimumNotice || '2'),
+      status: 'active', // Set status to active directly
+      updatedAt: new Date().toISOString()
+    }
+    
+    console.log('Publishing profile with data:', { id: profileIdToPublish, status: profileData.status })
+    
+    if (profileIdToPublish) {
+      // Update existing profile with active status
+      await profileStore.updateProfile(profileIdToPublish, profileData)
+      
+      // Handle services, pricing, and media in parallel to reduce requests
+      const updatePromises = []
+      
+      // Update services if changed
+      if (selectedServices.value.length > 0) {
+        updatePromises.push(updateServices())
       }
+      
+      // Update pricing if changed
+      if (form.pricing.length > 0) {
+        updatePromises.push(updatePricing())
+      }
+      
+      // Wait for all updates to complete
+      await Promise.all(updatePromises)
+      
+      // Upload any new media files
+      if (uploadedFiles.value.some(f => !f.existing && f.file)) {
+        await uploadNewMedia()
+      }
+    } else {
+      // Create new profile with active status
+      const newProfile = await profileStore.createProfile(authStore.user!.$id, profileData)
+      draftProfileId.value = newProfile.$id || newProfile.id
+      
+      // Create services, pricing, and upload media
+      await Promise.all([
+        createServices(),
+        createPricing(),
+        uploadNewMedia()
+      ])
     }
     
-    // Get the complete profile data for validation
-    await profileStore.fetchProfile(draftProfileId.value)
-    const profile = profileStore.profiles.find((p: any) => {
-      return p.id === draftProfileId.value
-    })
+    // Only refresh profiles once at the end
+    await profileStore.fetchProfiles()
     
-    if (!profile) {
-      authStore.setError('Profile not found. Please try again.')
-      return
-    }
+    // Clear any errors and show success
+    authStore.clearError()
+    success('🎉 Profile published successfully!')
     
-    // Validate the profile for activation
-    const validation = validateProfileCompletion(profile)
+    // Navigate immediately
+    router.push('/escort/profiles')
     
-    if (!validation.canActivate) {
-      // Show activation modal with validation errors
-      showActivationModal.value = true
-      return
-    }
-    
-    // Profile is valid, activate it
-    await handleProfileActivation()
-    
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error publishing profile:', error)
-    authStore.setError('Failed to publish profile. Please try again.')
+    const errorMessage = error.message || 'Failed to publish profile. Please try again.'
+    authStore.setError(errorMessage)
+    showError(errorMessage)
   } finally {
     isLoading.value = false
   }
+}
+
+// Helper function to update services
+const updateServices = async () => {
+  if (!draftProfileId.value && !profileId.value) return
+  
+  const profileIdToUse = draftProfileId.value || profileId.value!
+  
+  // For now, just create all services fresh (simpler and fewer requests)
+  const servicePromises = selectedServices.value.map(serviceValue => 
+    profileStore.addService(profileIdToUse, {
+      name: getServiceLabel(serviceValue),
+      description: serviceDescriptions.value[serviceValue] || '',
+      category: serviceValue
+    })
+  )
+  
+  await Promise.all(servicePromises)
+}
+
+// Helper function to update pricing
+const updatePricing = async () => {
+  if (!draftProfileId.value && !profileId.value) return
+  
+  const profileIdToUse = draftProfileId.value || profileId.value!
+  
+  // For now, just create all pricing fresh (simpler and fewer requests)
+  const pricingPromises = form.pricing
+    .filter(p => p.amount && p.type)
+    .map(pricingOption => 
+      profileStore.addPricing(profileIdToUse, pricingOption)
+    )
+  
+  await Promise.all(pricingPromises)
+}
+
+// Helper function to create services for new profile
+const createServices = async () => {
+  if (!draftProfileId.value) return
+  
+  const servicePromises = selectedServices.value.map(serviceValue => 
+    profileStore.addService(draftProfileId.value!, {
+      name: getServiceLabel(serviceValue),
+      description: serviceDescriptions.value[serviceValue] || '',
+      category: serviceValue
+    })
+  )
+  
+  await Promise.all(servicePromises)
+}
+
+// Helper function to create pricing for new profile
+const createPricing = async () => {
+  if (!draftProfileId.value) return
+  
+  const pricingPromises = form.pricing
+    .filter(p => p.amount && p.type)
+    .map(pricingOption => 
+      profileStore.addPricing(draftProfileId.value!, pricingOption)
+    )
+  
+  await Promise.all(pricingPromises)
+}
+
+// Helper function to upload new media
+const uploadNewMedia = async () => {
+  if (!draftProfileId.value && !profileId.value) return
+  
+  const profileIdToUse = draftProfileId.value || profileId.value!
+  
+  const mediaPromises = uploadedFiles.value
+    .filter(f => !f.existing && f.file)
+    .map(uploadedFile => 
+      profileStore.uploadMedia(profileIdToUse, uploadedFile.file!, {
+        blur: uploadedFile.blur
+      })
+    )
+  
+  await Promise.all(mediaPromises)
 }
 
 const handleProfileActivation = async () => {
@@ -694,6 +892,12 @@ const handleProfileActivation = async () => {
     
     // Refresh the profile in the store
     await profileStore.fetchProfile(draftProfileId.value)
+    
+    // Also refresh all profiles to ensure the list is up to date
+    await profileStore.fetchProfiles()
+    
+    // Show success message
+    success('Profile activated successfully!')
     
     // Redirect to profiles page
     router.push('/escort/profiles')
@@ -1205,22 +1409,41 @@ const getFileType = (mimeType: string): string => {
           </div>
         </div>
         
-        <div class="uploaded-media" v-if="uploadedFiles.length > 0">
-          <div class="blur-info">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
-            </svg>
-            <span>You can blur faces in photos to protect your privacy</span>
+        <!-- Media count display -->
+        <div v-if="uploadedFiles.length > 0" class="media-count">
+          <div class="count-item">
+            <span class="count-icon">🖼️</span>
+            <span class="count-text">{{ uploadedFiles.filter(f => (f.type === 'photo') || (f.file && f.file.type.startsWith('image/'))).length }} / 5 images</span>
           </div>
+          <div class="count-item">
+            <span class="count-icon">🎥</span>
+            <span class="count-text">{{ uploadedFiles.filter(f => (f.type === 'video') || (f.file && f.file.type.startsWith('video/'))).length }} / 1 video</span>
+          </div>
+        </div>
+        
+        <div class="uploaded-media" v-if="uploadedFiles.length > 0">
           <div v-for="(file, index) in uploadedFiles" :key="index" class="media-item">
             <div class="media-preview" :class="{ blurred: file.blur }">
-              <!-- Image preview -->
+              <!-- Existing media (from server) -->
               <img 
-                v-if="file.file && file.file.type.startsWith('image/')" 
+                v-if="file.existing && file.preview && file.type === 'photo'" 
+                :src="file.preview" 
+                :alt="'Profile photo'"
+              />
+              <video 
+                v-else-if="file.existing && file.preview && file.type === 'video'" 
+                :src="file.preview" 
+                controls
+              >
+                Your browser does not support the video tag.
+              </video>
+              <!-- New image upload -->
+              <img 
+                v-else-if="file.file && file.file.type.startsWith('image/')" 
                 :src="file.preview" 
                 :alt="file.file.name"
               />
-              <!-- Video preview -->
+              <!-- New video upload -->
               <video 
                 v-else-if="file.file && file.file.type.startsWith('video/')" 
                 :src="file.preview" 
@@ -1239,7 +1462,7 @@ const getFileType = (mimeType: string): string => {
               </div>
             </div>
             <div class="media-controls">
-              <label v-if="(file.file && file.file.type.startsWith('image/')) || (file.existing && !file.file)" class="blur-toggle">
+              <label v-if="(file.file && file.file.type.startsWith('image/')) || (file.existing && file.type === 'photo')" class="blur-toggle">
                 <input type="checkbox" v-model="file.blur" />
                 <span class="toggle-switch"></span>
                 <span class="toggle-label">{{ file.blur ? 'Face Blurred' : 'Face Visible' }}</span>
@@ -1262,7 +1485,7 @@ const getFileType = (mimeType: string): string => {
             />
             <div class="upload-icon">📎</div>
             <p>Click to upload files</p>
-            <span>Images, videos up to 5MB each</span>
+            <span>Max: 5 images, 1 video (5MB each)</span>
           </label>
         </div>
       </div>
@@ -1307,13 +1530,25 @@ const getFileType = (mimeType: string): string => {
           <button 
             v-if="currentStep === totalSteps"
             type="submit" 
-            :disabled="isLoading || !canPublish" 
+            :disabled="isLoading" 
             class="btn btn-primary"
-            :title="!canPublish ? 'Complete all required steps to publish' : ''"
+            :class="{ 'btn-success': detailedCompletion.overall === 100 }"
           >
-            <span v-if="isLoading">{{ profile?.status === 'active' ? 'Updating...' : 'Publishing...' }}</span>
+            <span v-if="isLoading" class="loading-spinner">
+              <svg class="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              {{ profile?.status === 'active' ? 'Updating...' : 'Publishing...' }}
+            </span>
             <span v-else-if="profile?.status === 'active'">Update Profile</span>
-            <span v-else>{{ isEditMode ? 'Activate Profile' : 'Publish Profile' }}</span>
+            <span v-else-if="detailedCompletion.overall === 100">
+              <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" class="inline mr-2">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+              </svg>
+              Publish Profile
+            </span>
+            <span v-else>Complete Profile ({{ detailedCompletion.overall }}%)</span>
           </button>
         </div>
       </div>
@@ -1605,6 +1840,10 @@ const getFileType = (mimeType: string): string => {
   &.btn-primary {
     background-color: var(--color-accent);
     color: white;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
     
     &:hover:not(:disabled) {
       background-color: var(--color-accent-dark);
@@ -1613,6 +1852,24 @@ const getFileType = (mimeType: string): string => {
     &:disabled {
       opacity: 0.6;
       cursor: not-allowed;
+    }
+    
+    &.btn-success {
+      background-color: #10b981;
+      
+      &:hover:not(:disabled) {
+        background-color: #059669;
+      }
+    }
+    
+    .loading-spinner {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+      
+      .animate-spin {
+        animation: spin 1s linear infinite;
+      }
     }
   }
   
@@ -1785,23 +2042,32 @@ const getFileType = (mimeType: string): string => {
   }
 }
 
-.blur-info {
+
+
+.media-count {
   display: flex;
-  align-items: center;
-  gap: var(--spacing-xs);
-  padding: var(--spacing-sm) var(--spacing-md);
-  background: #e0e7ff;
-  border-radius: 8px;
+  gap: var(--spacing-lg);
   margin-bottom: var(--spacing-md);
-  color: #4c1d95;
-  font-size: 0.9rem;
+  padding: var(--spacing-sm) var(--spacing-md);
+  background: var(--color-background-alt);
+  border-radius: var(--border-radius-md);
   
-  svg {
-    flex-shrink: 0;
-    color: #6366f1;
+  .count-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    
+    .count-icon {
+      font-size: 1.2rem;
+    }
+    
+    .count-text {
+      color: var(--color-text);
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
   }
 }
-
 
 .uploaded-media {
   display: grid;
@@ -1828,7 +2094,7 @@ const getFileType = (mimeType: string): string => {
     &.blurred {
       position: relative;
       
-      img {
+      img, video {
         filter: blur(15px);
       }
       
@@ -1840,6 +2106,8 @@ const getFileType = (mimeType: string): string => {
         transform: translate(-50%, -50%);
         font-size: 3rem;
         opacity: 0.5;
+        z-index: 1;
+        pointer-events: none;
       }
     }
     
@@ -2643,6 +2911,15 @@ const getFileType = (mimeType: string): string => {
   .loading-spinner {
     color: var(--color-text-light);
     font-style: italic;
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
   }
 }
 </style> 

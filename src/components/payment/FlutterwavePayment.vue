@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { flutterwaveService, type FlutterwaveConfig, type FlutterwaveResponse } from '../../services/flutterwaveService'
+import { flutterwaveService } from '../../services/flutterwaveService'
 import { useAuthStore } from '../../stores/auth'
-import { getUserCurrency } from '../../utils/currency'
 import type { PaymentIntent } from '../../services/paymentService'
 
 interface Props {
@@ -12,47 +11,139 @@ interface Props {
   paymentType: 'booking' | 'subscription' | 'advertising' | 'gift'
   relatedId?: string
   metadata?: Record<string, any>
-  onSuccess?: (response: FlutterwaveResponse) => void
+  onSuccess?: (response: any) => void
   onError?: (error: Error) => void
   onClose?: () => void
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  currency: getUserCurrency()
+  currency: 'USD'
 })
 
 const emit = defineEmits<{
-  'payment-success': [response: FlutterwaveResponse]
-  'payment-error': [error: Error]
-  'payment-closed': []
+  'success': [response: any]
+  'error': [error: Error]
+  'closed': []
 }>()
 
 const authStore = useAuthStore()
 
 // State
 const isProcessing = ref(false)
-const paymentConfig = ref<FlutterwaveConfig | null>(null)
+const paymentConfig = ref<any>(null)
 const transactionId = ref<string>('')
+const publicKey = import.meta.env.VITE_FLUTTERWAVE_PUBLIC_KEY || ''
 
 // Computed
 const user = computed(() => authStore.user)
 const userEmail = computed(() => user.value?.email || '')
 const userName = computed(() => user.value?.name || 'User')
 
+// Check if Flutterwave is configured
+const isConfigured = computed(() => 
+  !!publicKey && publicKey !== 'your_flutterwave_public_key_here'
+)
+
+// Check if script is loaded
+const isScriptLoaded = ref(false)
+
+// Check script loading status
+const checkScriptLoaded = () => {
+  if (typeof window !== 'undefined') {
+    isScriptLoaded.value = !!(window as any).FlutterwaveCheckout
+    console.log('Flutterwave script status:', {
+      windowDefined: typeof window !== 'undefined',
+      FlutterwaveCheckout: !!(window as any).FlutterwaveCheckout,
+      isScriptLoaded: isScriptLoaded.value
+    })
+  }
+  return isScriptLoaded.value
+}
+
+// Load Flutterwave script dynamically
+const loadFlutterwaveScript = (): Promise<void> => {
+  return new Promise((resolve, reject) => {
+    if (checkScriptLoaded()) {
+      resolve()
+      return
+    }
+
+    // Check if script is already being loaded
+    const existingScript = document.querySelector('script[src*="flutterwave"]')
+    if (existingScript) {
+      existingScript.addEventListener('load', () => {
+        setTimeout(() => {
+          if (checkScriptLoaded()) {
+            resolve()
+          } else {
+            reject(new Error('Script loaded but FlutterwaveCheckout not available'))
+          }
+        }, 100)
+      })
+      return
+    }
+
+    // Create and load script
+    const script = document.createElement('script')
+    script.src = 'https://checkout.flutterwave.com/v3.js'
+    script.async = true
+    
+    script.onload = () => {
+      console.log('Flutterwave script loaded')
+      setTimeout(() => {
+        if (checkScriptLoaded()) {
+          resolve()
+        } else {
+          reject(new Error('Script loaded but FlutterwaveCheckout not available'))
+        }
+      }, 100)
+    }
+    
+    script.onerror = () => {
+      reject(new Error('Failed to load Flutterwave script'))
+    }
+    
+    document.head.appendChild(script)
+  })
+}
+
 // Initialize payment configuration
 const initializePayment = async () => {
+  console.log('Initializing payment with props:', {
+    amount: props.amount,
+    currency: props.currency,
+    description: props.description,
+    paymentType: props.paymentType,
+    isConfigured: isConfigured.value,
+    isScriptLoaded: isScriptLoaded.value
+  })
+
   if (!user.value) {
-    emit('payment-error', new Error('User not authenticated'))
+    emit('error', new Error('User not authenticated'))
+    return
+  }
+
+  if (!isConfigured.value) {
+    emit('error', new Error('Flutterwave is not configured. Please set up your API keys.'))
     return
   }
 
   try {
     isProcessing.value = true
 
+    // Ensure Flutterwave script is loaded
+    try {
+      await loadFlutterwaveScript()
+      console.log('Flutterwave script confirmed loaded')
+    } catch (error: any) {
+      console.error('Failed to load Flutterwave script:', error)
+      throw new Error('Unable to load payment system. Please refresh the page and try again.')
+    }
+
     // Create payment configuration
-    paymentConfig.value = flutterwaveService.createPaymentConfig({
+    const config = flutterwaveService.createPaymentConfig({
       amount: props.amount,
-      currency: props.currency,
+      currency: props.currency || 'USD',
       email: userEmail.value,
       name: userName.value,
       description: props.description,
@@ -64,7 +155,7 @@ const initializePayment = async () => {
     // Create payment intent in database
     const paymentIntent: PaymentIntent = {
       amount: props.amount,
-      currency: props.currency,
+      currency: props.currency || 'USD',
       clientId: user.value.$id,
       description: props.description,
       metadata: {
@@ -90,23 +181,28 @@ const initializePayment = async () => {
 
     // Create payment record
     transactionId.value = await flutterwaveService.createPaymentRecord(
-      paymentConfig.value,
+      config,
       user.value.$id,
       paymentIntent
     )
 
+    // Store config for Pay Now button
+    paymentConfig.value = config
+    
+    console.log('Payment config created:', paymentConfig.value)
     isProcessing.value = false
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error initializing payment:', error)
     isProcessing.value = false
-    emit('payment-error', error as Error)
+    emit('error', error)
   }
 }
 
 // Handle successful payment
-const handlePaymentSuccess = async (response: FlutterwaveResponse) => {
+const handlePaymentSuccess = async (response: any) => {
   try {
     isProcessing.value = true
+    console.log('Payment response received:', response)
 
     // Update payment record
     await flutterwaveService.updatePaymentRecord(transactionId.value, response)
@@ -121,48 +217,77 @@ const handlePaymentSuccess = async (response: FlutterwaveResponse) => {
 
     // Call success callback
     props.onSuccess?.(response)
-    emit('payment-success', response)
+    emit('success', response)
 
     isProcessing.value = false
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error handling payment success:', error)
     isProcessing.value = false
-    emit('payment-error', error as Error)
+    emit('error', error)
   }
 }
 
 // Handle payment closure
 const handlePaymentClose = () => {
   props.onClose?.()
-  emit('payment-closed')
+  emit('closed')
 }
 
-// Make payment using Flutterwave JS
-const makePayment = () => {
+// Make payment using Flutterwave
+const makePayment = async () => {
   if (!paymentConfig.value) {
-    emit('payment-error', new Error('Payment not initialized'))
+    emit('error', new Error('Payment not initialized. Please check Flutterwave configuration.'))
     return
   }
 
-  // Use Flutterwave's inline payment method
-  const flwConfig = {
-    ...paymentConfig.value,
-    callback: handlePaymentSuccess,
-    onclose: handlePaymentClose
-  }
+  try {
+    // Double-check script is loaded before proceeding
+    if (!checkScriptLoaded()) {
+      console.log('Script not loaded, attempting to load...')
+      await loadFlutterwaveScript()
+    }
 
-  // FlutterwaveCheckout is loaded from CDN
-  if (typeof window !== 'undefined' && (window as any).FlutterwaveCheckout) {
-    (window as any).FlutterwaveCheckout(flwConfig)
-  } else {
-    // Fallback to service method
-    flutterwaveService.initializePayment(flwConfig)
+    if (!isScriptLoaded.value) {
+      throw new Error('Payment system unavailable. Please refresh the page.')
+    }
+
+    console.log('Initializing Flutterwave payment with config:', {
+      public_key: paymentConfig.value.public_key ? 'Set' : 'Not set',
+      amount: paymentConfig.value.amount,
+      currency: paymentConfig.value.currency,
+      tx_ref: paymentConfig.value.tx_ref,
+      customer_email: paymentConfig.value.customer?.email,
+      customer_name: paymentConfig.value.customer?.name
+    })
+
+    // Use Flutterwave's checkout
+    ;(window as any).FlutterwaveCheckout({
+      ...paymentConfig.value,
+      callback: handlePaymentSuccess,
+      onClose: handlePaymentClose
+    })
+  } catch (error: any) {
+    console.error('Error initializing payment:', error)
+    emit('error', new Error(`Failed to initialize payment: ${error.message}`))
   }
 }
 
 // Initialize on mount
-onMounted(() => {
-  initializePayment()
+onMounted(async () => {
+  // Check if script is already loaded
+  checkScriptLoaded()
+  
+  // Set up periodic check for script loading
+  const checkInterval = setInterval(() => {
+    if (checkScriptLoaded()) {
+      clearInterval(checkInterval)
+    }
+  }, 500)
+  
+  // Clear interval after 10 seconds
+  setTimeout(() => clearInterval(checkInterval), 10000)
+  
+  await initializePayment()
 })
 
 // Expose method to parent
@@ -180,7 +305,7 @@ defineExpose({
     </div>
 
     <!-- Payment Ready -->
-    <div v-else-if="paymentConfig" class="payment-ready">
+    <div v-else-if="paymentConfig && isConfigured" class="payment-ready">
       <div class="payment-summary">
         <h3>Payment Summary</h3>
         
@@ -229,12 +354,53 @@ defineExpose({
       </div>
       
       <div class="payment-actions">
-        <button @click="$emit('payment-closed')" class="btn btn-secondary">
+        <button @click="handlePaymentClose" class="btn btn-secondary">
           Cancel
         </button>
-        <button @click="makePayment" class="btn btn-primary">
-          Pay Now
+        
+        <button 
+          @click="makePayment" 
+          :disabled="isProcessing || !isScriptLoaded"
+          class="btn btn-primary"
+        >
+          {{ isProcessing ? 'Processing...' : !isScriptLoaded ? 'Loading Payment System...' : 'Pay Now' }}
         </button>
+      </div>
+    </div>
+
+    <!-- Script Not Loaded State -->
+    <div v-else-if="isConfigured && !isScriptLoaded" class="payment-error">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+      </svg>
+      <p>Loading payment system...</p>
+      <p class="small-text">This usually takes a few seconds</p>
+      <div class="script-loading-actions">
+        <button @click="loadFlutterwaveScript" class="btn btn-secondary">
+          Retry Loading
+        </button>
+        <button @click="() => window.location.reload()" class="btn btn-outline">
+          Refresh Page
+        </button>
+      </div>
+    </div>
+
+    <!-- Configuration Error State -->
+    <div v-else-if="!isConfigured" class="payment-error">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+      </svg>
+      <p>Flutterwave is not configured</p>
+      <div class="error-details">
+        <p>Setup required:</p>
+        <ul>
+          <li>Add VITE_FLUTTERWAVE_PUBLIC_KEY to your .env file</li>
+          <li>Add VITE_FLUTTERWAVE_SECRET_KEY to your .env file</li>
+          <li>Restart the development server</li>
+        </ul>
+        <p class="setup-link">
+          See <a href="/PAYMENT_SETUP.md" target="_blank">Payment Setup Guide</a> for help
+        </p>
       </div>
     </div>
 
@@ -356,6 +522,11 @@ defineExpose({
       padding: 1rem;
       font-size: 1rem;
       font-weight: 600;
+      
+      &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
     }
   }
 }
@@ -373,6 +544,58 @@ defineExpose({
   p {
     margin: 0 0 1.5rem 0;
     color: var(--color-text-light);
+  }
+
+  .small-text {
+    font-size: 0.875rem;
+    margin: 0.5rem 0;
+  }
+
+  .script-loading-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin-top: 1rem;
+    
+    .btn {
+      padding: 0.75rem 1.5rem;
+    }
+  }
+
+  .error-details {
+    text-align: left;
+    background: #ffebee;
+    padding: 1rem;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+
+    p {
+      margin: 0 0 0.5rem 0;
+      font-weight: 600;
+    }
+
+    ul {
+      margin: 0 0 1rem 1.5rem;
+      padding: 0;
+
+      li {
+        margin-bottom: 0.25rem;
+      }
+    }
+
+    .setup-link {
+      margin: 0;
+      font-size: 0.875rem;
+
+      a {
+        color: #1976d2;
+        text-decoration: none;
+
+        &:hover {
+          text-decoration: underline;
+        }
+      }
+    }
   }
 }
 

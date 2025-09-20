@@ -4,10 +4,10 @@ import type { Transaction, PaymentIntent } from './paymentService'
 
 // Flutterwave configuration
 export interface FlutterwaveConfig {
-  publicKey: string
+  public_key: string
   currency: string
-  country: string
-  paymentOptions: string
+  payment_options: string
+  redirect_url: string
   customizations: {
     title: string
     description: string
@@ -64,8 +64,14 @@ class FlutterwaveService {
     this.publicKey = import.meta.env.VITE_FLUTTERWAVE_PUBLIC_KEY || ''
     this.secretKey = import.meta.env.VITE_FLUTTERWAVE_SECRET_KEY || ''
     
-    if (!this.publicKey || !this.secretKey) {
-      console.warn('Flutterwave keys not configured. Payment processing will not work.')
+    if (!this.publicKey || !this.secretKey || this.publicKey === 'your_flutterwave_public_key_here') {
+      console.error('❌ Flutterwave keys not configured!')
+      console.error('Please follow these steps:')
+      console.error('1. Create a .env file in the project root')
+      console.error('2. Copy .env.example to .env')
+      console.error('3. Add your Flutterwave keys to the .env file')
+      console.error('4. Restart the development server')
+      console.error('See PAYMENT_SETUP.md for detailed instructions')
     }
   }
 
@@ -96,15 +102,19 @@ class FlutterwaveService {
 
   // Create payment configuration for Flutterwave modal
   createPaymentConfig(data: FlutterwavePaymentData): FlutterwaveConfig {
+    if (!this.publicKey || this.publicKey === 'your_flutterwave_public_key_here') {
+      throw new Error('Flutterwave is not configured. Please set up your API keys.')
+    }
+    
     const txRef = this.generateTxRef()
     
     return {
-      publicKey: this.publicKey,
+      public_key: this.publicKey,
       tx_ref: txRef,
       amount: data.amount,
       currency: data.currency || 'USD',
-      country: 'US',
-      paymentOptions: 'card,account,ussd,qr,mpesa,mobilemoneyghana,mobilemoneyfranco,mobilemoneyuganda,mobilemoneyrwanda,mobilemoneyzambia,mobilemoneytanzania,barter,bank-transfer,credit',
+      payment_options: 'card,account,ussd,qr,mpesa,mobilemoneyghana,mobilemoneyfranco,mobilemoneyuganda,mobilemoneyrwanda,mobilemoneyzambia,mobilemoneytanzania,barter,bank-transfer,credit',
+      redirect_url: '',
       customizations: {
         title: 'NdoloEscorts',
         description: data.description,
@@ -112,7 +122,7 @@ class FlutterwaveService {
       },
       customer: {
         email: data.email,
-        phone_number: data.phone,
+        phone_number: data.phone || '',
         name: data.name
       },
       meta: {
@@ -154,22 +164,28 @@ class FlutterwaveService {
     paymentIntent: PaymentIntent
   ): Promise<string> {
     try {
+      // Calculate net amount (after platform fees)
+      const platformFeeRate = 0.20 // 20% platform fee
+      const platformFee = Math.round(config.amount * platformFeeRate)
+      const netAmount = config.amount - platformFee
+      
       const transaction = await databases.createDocument(
         DATABASE_ID,
         PAYMENTS_COLLECTION_ID,
         ID.unique(),
         {
-          txRef: config.tx_ref,
+          transactionId: config.tx_ref,
           bookingId: paymentIntent.bookingId,
           advertisingId: paymentIntent.advertisingId,
           escortId: paymentIntent.escortId,
           clientId: paymentIntent.clientId || userId,
           profileId: paymentIntent.profileId,
           amount: config.amount,
+          netAmount: netAmount,
           currency: config.currency,
           type: config.meta?.paymentType || 'booking',
           status: 'pending',
-          paymentMethod: 'flutterwave',
+          paymentProvider: 'flutterwave',
           description: config.customizations.description,
           metadata: JSON.stringify(config.meta || {}),
           createdAt: new Date().toISOString(),
@@ -197,9 +213,8 @@ class FlutterwaveService {
         updatedAt: new Date().toISOString()
       }
 
-      if (response.flw_ref) {
-        updateData.flutterwaveRef = response.flw_ref
-      }
+      // Note: flw_ref is already stored in processorResponse
+      // No need for a separate flutterwaveRef field
 
       const updated = await databases.updateDocument(
         DATABASE_ID,
@@ -221,7 +236,7 @@ class FlutterwaveService {
       const response = await databases.listDocuments(
         DATABASE_ID,
         PAYMENTS_COLLECTION_ID,
-        [Query.equal('txRef', txRef)]
+        [Query.equal('transactionId', txRef)]
       )
 
       if (response.documents.length === 0) {
@@ -418,7 +433,7 @@ class FlutterwaveService {
         PAYMENTS_COLLECTION_ID,
         [
           Query.equal(field, userId),
-          Query.equal('paymentMethod', 'flutterwave'),
+          Query.equal('paymentProvider', 'flutterwave'),
           Query.orderDesc('$createdAt'),
           Query.limit(100)
         ]
@@ -515,18 +530,23 @@ class FlutterwaveService {
         throw new Error('Insufficient balance')
       }
 
+      // Generate transaction ID for withdrawal
+      const transactionId = `WD-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+      
       // Create withdrawal record
       const withdrawal = await databases.createDocument(
         DATABASE_ID,
         PAYMENTS_COLLECTION_ID,
         ID.unique(),
         {
+          transactionId,
           escortId,
           amount,
+          netAmount: amount, // For withdrawals, net amount equals full amount
           currency: 'USD',
           type: 'withdrawal',
           status: 'pending',
-          paymentMethod: 'bank_transfer',
+          paymentProvider: 'bank_transfer',
           bankDetails: JSON.stringify(bankDetails),
           metadata: JSON.stringify({
             requestedAt: new Date().toISOString(),

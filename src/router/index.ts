@@ -49,6 +49,22 @@ const routes: Array<RouteRecordRaw> = [
     component: () => import('../views/HowItWorks.vue')
   },
   {
+    path: '/payment-test',
+    name: 'PaymentTest',
+    component: () => import('../views/PaymentTest.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/flutterwave-test',
+    name: 'FlutterwaveTest',
+    component: () => import('../views/FlutterwaveTest.vue')
+  },
+  {
+    path: '/flutterwave-inline',
+    name: 'FlutterwaveInline',
+    component: () => import('../views/FlutterwaveInline.vue')
+  },
+  {
     path: '/privacy',
     name: 'PrivacyPolicy',
     component: () => import('../views/PrivacyPolicy.vue')

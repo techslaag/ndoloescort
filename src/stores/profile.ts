@@ -132,6 +132,20 @@ export const useProfileStore = defineStore('profile', () => {
       setLoading(true)
       clearError()
       currentProfile.value = await profileService.getProfile(profileId)
+      
+      // Also update it in the profiles array if it exists
+      const index = profiles.value.findIndex(p => {
+        const pId = (p as any).$id || (p as any).id
+        return pId === profileId
+      })
+      
+      if (index !== -1 && currentProfile.value) {
+        profiles.value[index] = currentProfile.value
+      } else if (currentProfile.value) {
+        // Add to profiles array if not present
+        profiles.value.push(currentProfile.value)
+      }
+      
       return currentProfile.value
     } catch (err: any) {
       setError(handleAppwriteError(err, 'fetchProfile'))

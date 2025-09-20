@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import { useProfileStore } from '../../stores/profile'
 import { useMessagingStore } from '../../stores/messaging'
+import { useSubscriptionStore } from '../../stores/subscription'
 import { useToast } from '../../composables/useToast'
 import ErrorAlert from '../../components/ErrorAlert.vue'
 import ProfileVerificationButton from '../../components/escort/ProfileVerificationButton.vue'
@@ -13,6 +14,7 @@ const router = useRouter()
 const authStore = useAuthStore()
 const profileStore = useProfileStore()
 const messagingStore = useMessagingStore()
+const subscriptionStore = useSubscriptionStore()
 const { success, error: showError } = useToast()
 
 // Delete modal state
@@ -68,6 +70,13 @@ const getProfileCompletion = (profile: any) => {
   }
   const basicComplete = Object.values(basicInfoComplete).every(v => v)
   if (basicComplete) completedSteps++
+  
+  console.log('Profile completion debug:', {
+    profileId: profile.$id || profile.id,
+    basicInfoComplete,
+    basicComplete,
+    completedSteps
+  })
   
   // Step 2: Services (at least one service with description)
   const hasServices = profile.services && profile.services.length > 0
@@ -126,6 +135,9 @@ onMounted(() => {
   
   // Initialize messaging store to get unread counts
   messagingStore.loadConversations()
+  
+  // Load subscription data
+  subscriptionStore.loadUserSubscription()
 })
 
 const loadProfiles = async () => {
@@ -142,35 +154,47 @@ const editProfile = (profileId: string) => {
   router.push(`/escort/profiles/${profileId}/edit`)
 }
 
-const toggleProfileStatus = async (profile: any) => {
-  try {
-    const profileId = profile.$id || profile.id
-    
-    // Check if profile is complete before activating from draft
-    if (profile.status === 'draft') {
-      const completion = getProfileCompletion(profile)
-      if (completion < 100) {
-        profileStore.setError('Profile must be 100% complete before activation. Current completion: ' + completion + '%')
-        return
-      }
-    }
-    
-    // Determine new status
-    let newStatus: 'draft' | 'active' | 'paused' | 'inactive' = 'active'
-    if (profile.status === 'active') {
-      newStatus = 'paused'
-    } else if (profile.status === 'paused') {
-      newStatus = 'active'
-    } else if (profile.status === 'draft') {
-      newStatus = 'active'
-    }
-    
-    await profileStore.updateProfile(profileId, { status: newStatus })
-  } catch (error) {
-    console.error('Error updating profile status:', error)
-    profileStore.setError('Failed to update profile status')
+const getProfileBackgroundImage = (profile: any) => {
+  // Check if profile has media
+  if (!profile.media || profile.media.length === 0) {
+    return null
   }
+  
+  // Find the first photo (not video)
+  const firstPhoto = profile.media.find((m: any) => m.type === 'photo' || !m.type)
+  
+  if (firstPhoto) {
+    return firstPhoto.url || firstPhoto.thumbnailUrl
+  }
+  
+  // If only videos, return null (will show placeholder)
+  return null
 }
+
+const hasOnlyVideos = (profile: any) => {
+  if (!profile.media || profile.media.length === 0) return false
+  return profile.media.every((m: any) => m.type === 'video')
+}
+
+const canCreateNewProfile = computed(() => {
+  // Free plan users can only have 1 profile
+  if (subscriptionStore.isFreeTier && profileStore.profiles.length >= 1) {
+    return false
+  }
+  // Check general subscription limits
+  return subscriptionStore.canCreateProfile
+})
+
+const createProfileButtonText = computed(() => {
+  if (!canCreateNewProfile.value) {
+    if (subscriptionStore.isFreeTier) {
+      return 'Upgrade to Create More'
+    }
+    return 'Profile Limit Reached'
+  }
+  return profileStore.profiles.length === 0 ? 'Create Your First Profile' : 'Create New Profile'
+})
+
 
 const viewAnalytics = (profileId: string) => {
   // This is just a safety check since the button should be disabled
@@ -209,8 +233,36 @@ const handleErrorClear = () => {
   profileStore.clearError()
 }
 
-const createNewProfile = () => {
-  router.push('/escort/profiles/create')
+const createNewProfile = async () => {
+  try {
+    // If user cannot create profile, go to subscription page
+    if (!canCreateNewProfile.value) {
+      router.push('/subscription')
+      return
+    }
+    
+    // Load subscription data first
+    await subscriptionStore.loadUserSubscription()
+    
+    // Double-check if user is on free plan and already has profiles
+    if (subscriptionStore.isFreeTier && profileStore.profiles.length >= 1) {
+      showError('Free plan allows only 1 profile. Please upgrade to create more profiles.')
+      router.push('/subscription')
+      return
+    }
+    
+    // Check general profile creation limits
+    if (!subscriptionStore.canCreateProfile) {
+      showError(`You have reached your profile limit. ${subscriptionStore.profilesRemaining} profiles remaining this month.`)
+      router.push('/subscription')
+      return
+    }
+    
+    router.push('/escort/profiles/create')
+  } catch (error) {
+    console.error('Error checking profile limits:', error)
+    showError('Unable to verify profile limits. Please try again.')
+  }
 }
 
 const showDeleteConfirmation = (profile: any) => {
@@ -304,11 +356,15 @@ const closeDeleteModal = () => {
     
     <div class="profiles-header">
       <h1>My Profiles</h1>
-      <button @click="createNewProfile" class="btn btn-primary">
+      <button 
+        @click="createNewProfile" 
+        class="btn btn-primary"
+        :title="!canCreateNewProfile ? 'Upgrade to create more profiles' : 'Create a new escort profile'"
+      >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
           <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
         </svg>
-        <span>Create New Profile</span>
+        <span>{{ createProfileButtonText }}</span>
       </button>
     </div>
     
@@ -319,11 +375,15 @@ const closeDeleteModal = () => {
     <div v-else-if="profileStore.profiles.length === 0" class="empty-state">
       <h3>No profiles yet</h3>
       <p>Create your first escort profile to start receiving bookings</p>
-      <button @click="createNewProfile" class="btn btn-primary">
+      <button 
+        @click="createNewProfile" 
+        class="btn btn-primary"
+        :title="!canCreateNewProfile ? 'Upgrade to create more profiles' : 'Create your first escort profile'"
+      >
         <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
           <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
         </svg>
-        <span>Create Your First Profile</span>
+        <span>{{ createProfileButtonText }}</span>
       </button>
     </div>
     
@@ -335,6 +395,7 @@ const closeDeleteModal = () => {
         :class="{ 
           'has-image': (profile as any).media && (profile as any).media.length > 0,
           'is-active': profile.status === 'active',
+          'video-only': hasOnlyVideos(profile),
           'is-verified': profile.verification?.isVerified,
           'is-draft': profile.status === 'draft'
         }"
@@ -342,15 +403,21 @@ const closeDeleteModal = () => {
         <!-- Card Background -->
         <div 
           class="card-background"
+          :class="{ 'video-only': hasOnlyVideos(profile) }"
           :style="{
-            backgroundImage: (profile as any).media && (profile as any).media.length > 0 && ((profile as any).media[0].url || (profile as any).media[0].thumbnailUrl) 
-              ? `url('${(profile as any).media[0].url || (profile as any).media[0].thumbnailUrl}')` 
-              : 'none',
+            backgroundImage: getProfileBackgroundImage(profile) ? `url('${getProfileBackgroundImage(profile)}')` : 'none',
             backgroundSize: 'cover',
             backgroundPosition: 'center'
           }"
         >
           <div class="background-overlay"></div>
+          <!-- Video indicator for video-only profiles -->
+          <div v-if="hasOnlyVideos(profile)" class="video-indicator">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4zM15 16H5V8h10v8z"/>
+            </svg>
+            <span>Video Profile</span>
+          </div>
         </div>
         <!-- Card Content -->
         <div class="profile-content">
@@ -380,9 +447,6 @@ const closeDeleteModal = () => {
             <div class="completion-header">
               <span class="completion-label">Profile Completion</span>
               <span class="completion-percentage">{{ getProfileCompletion(profile) }}%</span>
-            </div>
-            <div class="completion-bar">
-              <div class="completion-progress" :style="{ width: `${getProfileCompletion(profile)}%` }"></div>
             </div>
           </div>
           
@@ -424,23 +488,6 @@ const closeDeleteModal = () => {
         <!-- Card Footer -->
         <div class="profile-footer">
           <div class="footer-actions">
-            <button 
-              @click="toggleProfileStatus(profile)" 
-              class="action-btn"
-              :disabled="profile.status === 'draft' && getProfileCompletion(profile) < 100"
-              :title="profile.status === 'draft' && getProfileCompletion(profile) < 100 ? `Profile is ${getProfileCompletion(profile)}% complete. Complete all fields to activate.` : ''"
-            >
-              <svg v-if="profile.status === 'active'" width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM10 17l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-              </svg>
-              <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/>
-              </svg>
-              <template v-if="profile.status === 'active'">Deactivate</template>
-              <template v-else-if="profile.status === 'paused'">Activate</template>
-              <template v-else>Activate</template>
-            </button>
-            
             <ProfileVerificationButton 
               :profile="profile" 
             />
@@ -681,8 +728,10 @@ const closeDeleteModal = () => {
     display: flex;
     flex-direction: column;
     padding: var(--spacing-lg);
-    padding-top: 160px;
+    padding-top: var(--spacing-lg);
+    margin-top: 200px;
   }
+  
   
   .profile-completion {
     margin-bottom: var(--spacing-lg);
@@ -691,7 +740,6 @@ const closeDeleteModal = () => {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: var(--spacing-xs);
       
       .completion-label {
         font-size: 0.813rem;
@@ -703,30 +751,6 @@ const closeDeleteModal = () => {
         font-size: 0.813rem;
         color: #1f2937;
         font-weight: 600;
-      }
-    }
-    
-    .completion-bar {
-      width: 100%;
-      height: 8px;
-      background: #e5e7eb;
-      border-radius: 4px;
-      overflow: hidden;
-      
-      .completion-progress {
-        height: 100%;
-        background: linear-gradient(90deg, #4f46e5, #7c3aed);
-        border-radius: 4px;
-        transition: width 0.3s ease;
-        position: relative;
-        
-        &::after {
-          content: '';
-          position: absolute;
-          inset: 0;
-          background: linear-gradient(90deg, rgba(255,255,255,0.2), transparent);
-          animation: shimmer 2s infinite;
-        }
       }
     }
   }
@@ -967,6 +991,41 @@ const closeDeleteModal = () => {
       }
     }
   }
+  
+  .video-indicator {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(0, 0, 0, 0.8);
+    color: white;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    
+    svg {
+      width: 14px;
+      height: 14px;
+    }
+  }
+  
+  &.video-only {
+    .card-background {
+      background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+      
+      &::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: url("data:image/svg+xml,%3Csvg width='40' height='40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M20 20L0 0h20zM40 40L20 20v20zM20 20l20 20V20zM0 40l20-20v20z'/%3E%3C/g%3E%3C/svg%3E");
+      }
+    }
+  }
 }
 
 // Animations
@@ -1051,7 +1110,8 @@ const closeDeleteModal = () => {
     
     .profile-content {
       padding: var(--spacing-md);
-      padding-top: 120px;
+      padding-top: var(--spacing-md);
+      margin-top: 160px;
     }
     
     .profile-header {
@@ -1062,6 +1122,7 @@ const closeDeleteModal = () => {
       }
     }
     
+    
     .profile-completion {
       margin-bottom: var(--spacing-md);
       
@@ -1070,10 +1131,6 @@ const closeDeleteModal = () => {
         .completion-percentage {
           font-size: 0.75rem;
         }
-      }
-      
-      .completion-bar {
-        height: 6px;
       }
     }
     

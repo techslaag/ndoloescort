@@ -111,17 +111,54 @@ export function parseCurrency(value: string): number {
   return isNaN(parsed) ? 0 : parsed
 }
 
+// Exchange rates (base: USD)
+// In production, these should be fetched from a real-time API
+const EXCHANGE_RATES: Record<string, number> = {
+  USD: 1,
+  EUR: 0.95,
+  GBP: 0.8,
+  CAD: 1.5,
+  XAF: 650,
+  XOF: 650,
+  NGN: 1500,
+  ZAR: 19,
+  KES: 155,
+  GHS: 16,
+  AUD: 1.5,
+  NZD: 1.5,
+  JPY: 150,
+  CNY: 7.5,
+  INR: 83,
+  AED: 4,
+  SAR: 4
+}
+
 /**
- * Convert amount between currencies (placeholder - needs real exchange rates)
+ * Convert amount between currencies
  * @param amount - Amount to convert
  * @param from - Source currency
  * @param to - Target currency
  */
 export function convertCurrency(amount: number, from: string, to: string): number {
-  // This is a placeholder - in a real app, you'd fetch current exchange rates
-  // For now, return the same amount
-  console.warn('Currency conversion not implemented - returning same amount')
-  return amount
+  if (from === to) return amount
+  
+  // Convert to USD first (base currency)
+  const usdAmount = amount / (EXCHANGE_RATES[from] || 1)
+  
+  // Then convert to target currency
+  const convertedAmount = usdAmount * (EXCHANGE_RATES[to] || 1)
+  
+  return convertedAmount
+}
+
+/**
+ * Convert from USD to another currency
+ * @param amount - Amount in USD
+ * @param currency - Target currency
+ */
+export function convertFromUSD(amount: number, currency: string): number {
+  if (currency === 'USD') return amount
+  return amount * (EXCHANGE_RATES[currency] || 1)
 }
 
 /**

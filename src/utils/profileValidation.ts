@@ -75,11 +75,31 @@ export function validateProfileCompletion(profile: Partial<EscortProfile>): Prof
 
   // Step 4: Availability (Required - at least one working day)
   // Handle both nested and flat structures
-  const workingHours = profile.availability?.workingHours || 
-    ((profile as any).workingHours ? JSON.parse((profile as any).workingHours) : null)
+  console.log('validateProfileCompletion - Checking working hours:', {
+    hasAvailability: !!profile.availability,
+    availabilityWorkingHours: profile.availability?.workingHours,
+    flatWorkingHours: (profile as any).workingHours,
+    workingHoursType: typeof (profile as any).workingHours
+  })
+  
+  let workingHours = null
+  try {
+    workingHours = profile.availability?.workingHours || 
+      ((profile as any).workingHours ? 
+        (typeof (profile as any).workingHours === 'string' ? 
+          JSON.parse((profile as any).workingHours) : 
+          (profile as any).workingHours) 
+        : null)
+  } catch (e) {
+    console.error('Failed to parse workingHours:', e)
+  }
+  
+  console.log('validateProfileCompletion - Parsed working hours:', workingHours)
   
   const hasWorkingHours = workingHours && 
     Object.values(workingHours).some((day: any) => day.enabled)
+  
+  console.log('validateProfileCompletion - Has working hours:', hasWorkingHours)
   
   if (!hasWorkingHours) {
     missingFields.push('availability')
@@ -166,7 +186,17 @@ export function canPublishProfile(profile: Partial<EscortProfile>): {
   canPublish: boolean
   reason?: string 
 } {
+  console.log('canPublishProfile - Checking profile:', {
+    id: (profile as any).id || (profile as any).$id,
+    status: profile.status,
+    hasServices: !!profile.services?.length,
+    hasPricing: !!profile.pricing?.length,
+    hasMedia: !!profile.media?.length,
+    workingHours: (profile as any).workingHours
+  })
+  
   const validation = validateProfileCompletion(profile)
+  console.log('canPublishProfile - Validation result:', validation)
   
   if (!validation.canActivate) {
     if (validation.errors.length > 0) {
@@ -181,13 +211,14 @@ export function canPublishProfile(profile: Partial<EscortProfile>): {
     }
   }
   
-  // Additional business rules
+  // Check if profile thinks it's already active (this shouldn't happen with our fix)
   if (profile.status === 'active') {
-    return { 
-      canPublish: false, 
-      reason: 'Profile is already active' 
-    }
+    console.error('canPublishProfile - ERROR: Profile status is active in validation!', {
+      status: profile.status,
+      profileKeys: Object.keys(profile)
+    })
   }
   
+  // Don't check status here - let the service handle status validation
   return { canPublish: true }
 }

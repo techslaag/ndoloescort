@@ -14,16 +14,18 @@ export interface PaymentMethod {
 
 export interface Transaction {
   id: string
+  transactionId?: string
   bookingId?: string
   advertisingId?: string
   escortId?: string
   clientId: string
   profileId?: string
   amount: number
+  netAmount?: number
   currency: string
-  type: 'booking' | 'advertising' | 'subscription' | 'refund'
+  type: 'booking' | 'advertising' | 'subscription' | 'refund' | 'payout' | 'withdrawal'
   status: 'pending' | 'processing' | 'completed' | 'failed' | 'refunded'
-  paymentMethod: string
+  paymentProvider: string
   processorTransactionId?: string
   processorResponse?: any
   metadata?: Record<string, any>
@@ -53,6 +55,11 @@ export class PaymentService {
   // Create a payment intent
   async createPaymentIntent(intent: PaymentIntent): Promise<string> {
     try {
+      // Calculate net amount (after platform fees)
+      const platformFeeRate = 0.20 // 20% platform fee
+      const platformFee = Math.round(intent.amount * platformFeeRate)
+      const netAmount = intent.amount - platformFee
+      
       // In production, this would create a payment intent with your processor
       // For now, we'll create a transaction record
       const transaction = await databases.createDocument(
@@ -66,10 +73,11 @@ export class PaymentService {
           clientId: intent.clientId,
           profileId: intent.profileId,
           amount: intent.amount,
+          netAmount: netAmount,
           currency: intent.currency,
           type: intent.advertisingId ? 'advertising' : (intent.bookingId ? 'booking' : 'subscription'),
           status: 'pending',
-          paymentMethod: '',
+          paymentProvider: 'flutterwave',
           description: intent.description,
           metadata: JSON.stringify(intent.metadata || {}),
           createdAt: new Date().toISOString(),
@@ -245,6 +253,9 @@ export class PaymentService {
   // Create payout for escort
   async createPayout(escortId: string, amount: number): Promise<string> {
     try {
+      // Generate a unique transaction ID for the payout
+      const transactionId = `PAYOUT-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
+      
       // In production, this would initiate a payout to the escort's bank account
       // For demo, we'll create a payout record
       const payout = await databases.createDocument(
@@ -252,11 +263,14 @@ export class PaymentService {
         PAYMENTS_COLLECTION_ID,
         ID.unique(),
         {
+          transactionId,
           escortId,
           amount,
+          netAmount: amount, // For payouts, net amount equals full amount
           currency: 'USD',
           status: 'pending',
           type: 'payout',
+          paymentProvider: 'bank_transfer',
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         }
@@ -376,7 +390,7 @@ export class PaymentService {
         currency: doc.currency,
         type: doc.type,
         status: doc.status,
-        paymentMethod: doc.paymentMethod,
+        paymentProvider: doc.paymentProvider,
         processorTransactionId: doc.processorTransactionId,
         processorResponse: doc.processorResponse,
         metadata: doc.metadata ? JSON.parse(doc.metadata) : {},

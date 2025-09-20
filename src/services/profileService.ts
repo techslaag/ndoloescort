@@ -63,11 +63,15 @@ export class ProfileService {
       // If trying to activate profile, validate it first
       if (updates.status === 'active') {
         const currentProfile = await this.getProfile(profileId)
-        const mergedProfile = { ...currentProfile, ...updates }
-        const { canPublish, reason } = canPublishProfile(mergedProfile)
-        
-        if (!canPublish) {
-          throw new Error(`Cannot activate profile: ${reason}`)
+        // Only validate if the profile is not already active
+        if (currentProfile.status !== 'active') {
+          // For validation, use the current profile data but with draft status to check requirements
+          const profileToValidate = { ...currentProfile, status: 'draft' }
+          const { canPublish, reason } = canPublishProfile(profileToValidate)
+          
+          if (!canPublish) {
+            throw new Error(`Cannot activate profile: ${reason}`)
+          }
         }
       }
       
@@ -95,6 +99,13 @@ export class ProfileService {
         PROFILES_COLLECTION_ID,
         profileId
       )
+      
+      console.log('ProfileService.getProfile - Raw profile from Appwrite:', {
+        id: profile.$id,
+        status: profile.status,
+        allKeys: Object.keys(profile).filter(k => k.includes('status')),
+        fullProfile: profile
+      })
 
       // Fetch all related collections in parallel
       const [services, pricing, media, calendar] = await Promise.allSettled([
@@ -490,16 +501,50 @@ export class ProfileService {
   // Activate profile with validation
   async activateProfile(profileId: string): Promise<EscortProfile> {
     try {
+      console.log('ProfileService.activateProfile - Starting with profileId:', profileId)
+      
       const profile = await this.getProfile(profileId)
-      const { canPublish, reason } = canPublishProfile(profile)
+      console.log('ProfileService.activateProfile - Retrieved profile:', {
+        id: profile.id || profile.$id,
+        status: profile.status,
+        name: profile.name,
+        services: profile.services?.length,
+        pricing: profile.pricing?.length,
+        media: profile.media?.length,
+        workingHours: profile.workingHours,
+        location: { city: profile.locationCity, country: profile.locationCountry }
+      })
+      
+      // If already active, just return it
+      if (profile.status === 'active') {
+        console.log('ProfileService.activateProfile - Profile is already active')
+        return profile
+      }
+      
+      // Validate with draft status to check requirements
+      const profileToValidate = { ...profile, status: 'draft' }
+      console.log('ProfileService.activateProfile - Profile to validate:', {
+        originalStatus: profile.status,
+        validationStatus: profileToValidate.status,
+        profileKeys: Object.keys(profileToValidate).filter(k => k.includes('status'))
+      })
+      
+      const { canPublish, reason } = canPublishProfile(profileToValidate)
+      console.log('ProfileService.activateProfile - Validation result:', { canPublish, reason })
       
       if (!canPublish) {
+        console.error('ProfileService.activateProfile - Validation failed:', {
+          reason,
+          profileStatus: profile.status,
+          validationProfileStatus: profileToValidate.status
+        })
         throw new Error(reason || 'Profile cannot be activated')
       }
       
+      console.log('ProfileService.activateProfile - Updating profile status to active')
       return await this.updateProfile(profileId, { status: 'active' })
     } catch (error) {
-      console.error('Error activating profile:', error)
+      console.error('ProfileService.activateProfile - Error:', error)
       throw error
     }
   }

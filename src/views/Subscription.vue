@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useSubscriptionStore } from '../stores/subscription'
 import { useAuthStore } from '../stores/auth'
 import { SUBSCRIPTION_PLANS, type SubscriptionPlan, type BillingPeriod } from '../types/subscription'
-import { formatCurrency, getCurrencySymbol } from '../utils/currency'
+import { formatCurrency, getCurrencySymbol, getUserCurrency, convertFromUSD } from '../utils/currency'
 import FlutterwavePayment from '../components/payment/FlutterwavePayment.vue'
 import ErrorAlert from '../components/ErrorAlert.vue'
-import { flutterwaveService } from '../services/flutterwaveService'
 
 const router = useRouter()
 const subscriptionStore = useSubscriptionStore()
@@ -30,6 +29,23 @@ const currentUsage = computed(() => subscriptionStore.currentUsage)
 const daysUntilRenewal = computed(() => subscriptionStore.daysUntilRenewal)
 
 const isAuthenticated = computed(() => authStore.isAuthenticated)
+const userCurrency = ref(getUserCurrency())
+
+// Watch for currency changes and save preference
+watch(userCurrency, async (newCurrency) => {
+  if (authStore.user) {
+    try {
+      // Import account from appwrite directly
+      const { account } = await import('../lib/appwrite')
+      const currentPrefs = authStore.user.prefs || {}
+      await account.updatePrefs({ ...currentPrefs, currency: newCurrency })
+      // Refresh user data to update local state
+      await authStore.refreshUser()
+    } catch (error) {
+      console.error('Failed to save currency preference:', error)
+    }
+  }
+})
 
 onMounted(async () => {
   if (!isAuthenticated.value) {
@@ -86,11 +102,11 @@ const handlePaymentSuccess = async (response: any) => {
         selectedBillingPeriod.value
       )
     } else {
-      // Create new subscription with Flutterwave payment reference
+      // Create new subscription with Flutterwave transaction reference
       await subscriptionStore.createSubscription(
         selectedPlan.value.id,
         selectedBillingPeriod.value,
-        response.tx_ref // Flutterwave transaction reference
+        response.tx_ref // Flutterwave transaction reference (will be stored as transactionId)
       )
     }
 
@@ -129,17 +145,20 @@ const cancelSubscription = async () => {
 }
 
 const getPrice = (plan: SubscriptionPlan): number => {
-  return selectedBillingPeriod.value === 'monthly' ? plan.monthlyPrice : plan.yearlyPrice
+  const basePrice = selectedBillingPeriod.value === 'monthly' ? plan.monthlyPrice : plan.yearlyPrice
+  return convertFromUSD(basePrice, userCurrency.value)
 }
 
 const getMonthlyEquivalent = (plan: SubscriptionPlan): number => {
-  if (selectedBillingPeriod.value === 'monthly') return plan.monthlyPrice
-  return plan.yearlyPrice / 12
+  const basePrice = selectedBillingPeriod.value === 'monthly' 
+    ? plan.monthlyPrice 
+    : plan.yearlyPrice / 12
+  return convertFromUSD(basePrice, userCurrency.value)
 }
 
 const getSavings = (plan: SubscriptionPlan): number => {
   if (selectedBillingPeriod.value === 'monthly') return 0
-  return plan.yearlyDiscount
+  return convertFromUSD(plan.yearlyDiscount, userCurrency.value)
 }
 
 const formatFeature = (feature: string): string => {
@@ -190,21 +209,39 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
         <h1>Choose Your Plan</h1>
         <p>Select the perfect plan for your needs and unlock premium features</p>
         
-        <!-- Billing Period Toggle -->
-        <div class="billing-toggle">
-          <button 
-            :class="{ active: selectedBillingPeriod === 'monthly' }"
-            @click="selectedBillingPeriod = 'monthly'"
-          >
-            Monthly
-          </button>
-          <button 
-            :class="{ active: selectedBillingPeriod === 'yearly' }"
-            @click="selectedBillingPeriod = 'yearly'"
-          >
-            Yearly
-            <span class="save-badge">Save up to 20%</span>
-          </button>
+        <!-- Currency and Billing Controls -->
+        <div class="controls-wrapper">
+          <!-- Currency Selector -->
+          <div class="currency-selector">
+            <select v-model="userCurrency" class="currency-select">
+              <option value="USD">$ USD</option>
+              <option value="EUR">€ EUR</option>
+              <option value="GBP">£ GBP</option>
+              <option value="XAF">XAF</option>
+              <option value="XOF">XOF</option>
+              <option value="NGN">₦ NGN</option>
+              <option value="ZAR">R ZAR</option>
+              <option value="KES">KSh KES</option>
+              <option value="GHS">₵ GHS</option>
+            </select>
+          </div>
+          
+          <!-- Billing Period Toggle -->
+          <div class="billing-toggle">
+            <button 
+              :class="{ active: selectedBillingPeriod === 'monthly' }"
+              @click="selectedBillingPeriod = 'monthly'"
+            >
+              Monthly
+            </button>
+            <button 
+              :class="{ active: selectedBillingPeriod === 'yearly' }"
+              @click="selectedBillingPeriod = 'yearly'"
+            >
+              Yearly
+              <span class="save-badge">Save up to 20%</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -300,8 +337,8 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
             <div class="summary-card">
               <h3>{{ selectedPlan.name }} Plan</h3>
               <div class="price-display">
-                <span class="currency">{{ getCurrencySymbol() }}</span>
-                <span class="amount">{{ getPrice(selectedPlan) }}</span>
+                <span class="currency">{{ getCurrencySymbol(userCurrency) }}</span>
+                <span class="amount">{{ formatCurrency(getPrice(selectedPlan), userCurrency, { showSymbol: false }) }}</span>
                 <span class="period">/{{ selectedBillingPeriod === 'monthly' ? 'month' : 'year' }}</span>
               </div>
               
@@ -324,6 +361,7 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
             <FlutterwavePayment
               ref="paymentRef"
               :amount="getPrice(selectedPlan)"
+              :currency="userCurrency"
               :description="`${selectedPlan.name} subscription - ${selectedBillingPeriod}`"
               payment-type="subscription"
               :related-id="selectedPlan.id"
@@ -365,44 +403,27 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
           
           <div class="plan-pricing">
             <div class="price-main">
-              <span class="currency">{{ getCurrencySymbol() }}</span>
-              <span class="amount">{{ getPrice(plan) }}</span>
+              <span class="currency">{{ getCurrencySymbol(userCurrency) }}</span>
+              <span class="amount">{{ formatCurrency(getPrice(plan), userCurrency, { showSymbol: false }) }}</span>
               <span class="period">/{{ selectedBillingPeriod === 'monthly' ? 'mo' : 'yr' }}</span>
             </div>
             
             <div v-if="selectedBillingPeriod === 'yearly' && plan.monthlyPrice > 0" class="price-comparison">
-              {{ formatCurrency(getMonthlyEquivalent(plan)) }}/month
+              {{ formatCurrency(getMonthlyEquivalent(plan), userCurrency) }}/month
             </div>
             
             <div v-if="selectedBillingPeriod === 'yearly' && getSavings(plan) > 0" class="savings-badge">
-              Save {{ formatCurrency(getSavings(plan)) }}
+              Save {{ formatCurrency(getSavings(plan), userCurrency) }}
             </div>
           </div>
           
           <div class="plan-features">
             <ul class="features-list">
-              <li v-for="highlight in plan.highlights" :key="highlight" class="feature-item">
+              <li v-for="(highlight, index) in plan.highlights.slice(0, 4)" :key="highlight" class="feature-item">
                 <span class="feature-icon">✓</span>
                 {{ highlight }}
               </li>
             </ul>
-            
-            <div class="features-details">
-              <div v-if="plan.features.premiumBoosts.quantity > 0" class="feature-detail premium">
-                <span class="detail-icon">🚀</span>
-                {{ plan.features.premiumBoosts.quantity }} {{ plan.features.premiumBoosts.type }} boosts
-              </div>
-              
-              <div v-if="plan.features.proFlag" class="feature-detail pro">
-                <span class="detail-icon">⭐</span>
-                Pro badge on profile
-              </div>
-              
-              <div v-if="plan.features.supportLevel === 'priority'" class="feature-detail priority">
-                <span class="detail-icon">🎯</span>
-                Priority support
-              </div>
-            </div>
           </div>
           
           <div class="plan-action">
@@ -417,12 +438,16 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
             <div v-else class="current-plan-label">
               Your Current Plan
             </div>
+            
+            <a href="#features-comparison" class="see-all-features">
+              See all features →
+            </a>
           </div>
         </div>
       </div>
 
       <!-- Features Comparison -->
-      <div class="features-comparison">
+      <div id="features-comparison" class="features-comparison">
         <h2>Compare All Features</h2>
         <div class="comparison-table">
           <table>
@@ -562,7 +587,7 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
           </div>
           <div class="detail-row">
             <span class="label">New price:</span>
-            <span class="value">{{ formatCurrency(upgradePlan ? getPrice(upgradePlan) : 0) }}/{{ selectedBillingPeriod }}</span>
+            <span class="value">{{ formatCurrency(upgradePlan ? getPrice(upgradePlan) : 0, userCurrency) }}/{{ selectedBillingPeriod }}</span>
           </div>
           <div class="detail-row">
             <span class="label">Billing:</span>
@@ -605,6 +630,43 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
   }
 }
 
+.controls-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-lg);
+  flex-wrap: wrap;
+  
+  @media (max-width: 768px) {
+    flex-direction: column;
+    width: 100%;
+  }
+}
+
+.currency-selector {
+  .currency-select {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: 2px solid var(--color-text-lighter);
+    border-radius: var(--border-radius-md);
+    background: white;
+    color: var(--color-text-dark);
+    font-weight: 500;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    
+    &:hover {
+      border-color: var(--color-accent);
+    }
+    
+    &:focus {
+      outline: none;
+      border-color: var(--color-accent);
+      box-shadow: 0 0 0 3px rgba(var(--color-accent-rgb), 0.1);
+    }
+  }
+}
+
 .billing-toggle {
   display: inline-flex;
   background: var(--color-background-alt);
@@ -630,7 +692,7 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
     
     .save-badge {
       position: absolute;
-      top: -8px;
+      top: -38px;
       right: -8px;
       background: var(--color-success);
       color: white;
@@ -789,9 +851,27 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
 
 .plans-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--spacing-lg);
   margin-bottom: var(--spacing-xxl);
+  align-items: stretch;
+  justify-items: stretch;
+  
+  @media (max-width: 1200px) {
+    grid-template-columns: repeat(4, minmax(240px, 1fr));
+    overflow-x: auto;
+    padding-bottom: var(--spacing-md);
+  }
+  
+  @media (max-width: 992px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow-x: visible;
+  }
+  
+  @media (max-width: 576px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--spacing-md);
+  }
 }
 
 .plan-card {
@@ -801,10 +881,20 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
   padding: var(--spacing-xl);
   position: relative;
   transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   
-  &:hover:not(.disabled) {
-    transform: translateY(-4px);
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+  @media (max-width: 992px) {
+    padding: var(--spacing-lg);
+    height: 520px;
+  }
+  
+  @media (max-width: 576px) {
+    padding: var(--spacing-md);
+    height: 540px;
   }
   
   &.current {
@@ -814,7 +904,6 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
   
   &.popular {
     border-color: var(--color-accent);
-    transform: scale(1.05);
   }
   
   &.recommended {
@@ -828,13 +917,14 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
   
   .badge {
     position: absolute;
-    top: -10px;
+    top: -12px;
     left: 50%;
     transform: translateX(-50%);
-    padding: var(--spacing-xs) var(--spacing-md);
+    padding: 4px 12px;
     border-radius: var(--border-radius-sm);
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     font-weight: 600;
+    white-space: nowrap;
     
     &.popular-badge {
       background: var(--color-accent);
@@ -855,41 +945,70 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
 
 .plan-header {
   text-align: center;
-  margin-bottom: var(--spacing-lg);
+  margin-bottom: var(--spacing-md);
+  overflow: hidden;
   
   h3 {
     margin-bottom: var(--spacing-xs);
     color: var(--color-text-dark);
+    font-size: 1.25rem;
+    word-wrap: break-word;
   }
   
   .plan-description {
     color: var(--color-text-light);
-    font-size: 0.9rem;
+    font-size: 0.875rem;
+    word-wrap: break-word;
   }
 }
 
 .plan-pricing {
   text-align: center;
-  margin-bottom: var(--spacing-lg);
+  margin-bottom: var(--spacing-md);
+  overflow: hidden;
   
   .price-main {
     margin-bottom: var(--spacing-sm);
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 4px;
     
     .currency {
       font-size: 1.5rem;
       color: var(--color-text);
       vertical-align: top;
+      flex-shrink: 0;
+      
+      @media (max-width: 576px) {
+        font-size: 1.2rem;
+      }
     }
     
     .amount {
-      font-size: 3rem;
+      font-size: 1.5rem;
       font-weight: 700;
       color: var(--color-text-dark);
+      word-break: break-word;
+      max-width: 100%;
+      
+      @media (max-width: 992px) {
+        font-size: 2rem;
+      }
+      
+      @media (max-width: 576px) {
+        font-size: 1.5rem;
+      }
     }
     
     .period {
       font-size: 1rem;
       color: var(--color-text-light);
+      
+      @media (max-width: 576px) {
+        font-size: 0.9rem;
+      }
     }
   }
   
@@ -911,63 +1030,71 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
 }
 
 .plan-features {
-  margin-bottom: var(--spacing-lg);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: var(--spacing-sm);
   
   .features-list {
     list-style: none;
     margin-bottom: var(--spacing-md);
     
     .feature-item {
-      padding: var(--spacing-sm) 0;
+      padding: 8px 0;
       display: flex;
       align-items: start;
       gap: var(--spacing-sm);
+      font-size: 0.875rem;
+      line-height: 1.4;
+      
+      @media (max-width: 576px) {
+        padding: 6px 0;
+        font-size: 0.8rem;
+      }
       
       .feature-icon {
         color: var(--color-success);
         font-weight: 600;
         flex-shrink: 0;
+        font-size: 1rem;
+        margin-top: 1px;
       }
     }
   }
   
-  .features-details {
+  .features-badge {
     display: flex;
-    flex-direction: column;
     gap: var(--spacing-sm);
+    margin-top: auto;
+    flex-wrap: wrap;
+    justify-content: center;
     
-    .feature-detail {
-      display: flex;
+    .badge-item {
+      display: inline-flex;
       align-items: center;
       gap: var(--spacing-xs);
-      font-size: 0.9rem;
-      padding: var(--spacing-xs) var(--spacing-sm);
-      border-radius: var(--border-radius-sm);
+      padding: var(--spacing-xs) var(--spacing-md);
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 600;
       
       &.premium {
-        background: linear-gradient(135deg, #fff9e6 0%, #fff 100%);
-        border: 1px solid #ffd700;
-        color: #b8860b;
+        background: linear-gradient(135deg, #fff3cd 0%, #ffeaa7 100%);
+        color: #856404;
       }
       
       &.pro {
-        background: var(--color-primary-bg);
-        color: var(--color-primary);
-      }
-      
-      &.priority {
-        background: var(--color-accent-bg);
-        color: var(--color-accent);
-      }
-      
-      .detail-icon {
-        font-size: 1.1rem;
+        background: linear-gradient(135deg, #e7f3ff 0%, #cfe2ff 100%);
+        color: #0c5460;
       }
     }
   }
 }
 
 .plan-action {
+  margin-top: auto;
+  padding-top: var(--spacing-md);
+  
   .current-plan-label {
     text-align: center;
     color: var(--color-success);
@@ -975,6 +1102,22 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
     padding: var(--spacing-md);
     background: var(--color-success-bg);
     border-radius: var(--border-radius-md);
+  }
+  
+  .see-all-features {
+    display: block;
+    text-align: center;
+    margin-top: var(--spacing-sm);
+    color: var(--color-accent);
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: color 0.2s ease;
+    
+    &:hover {
+      color: var(--color-accent-dark);
+      text-decoration: underline;
+    }
   }
 }
 
@@ -1080,7 +1223,7 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
         }
         
         .amount {
-          font-size: 2.5rem;
+          font-size: 1.5rem;
           font-weight: 700;
           color: var(--color-text-dark);
         }
@@ -1273,9 +1416,6 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
     position: static !important;
   }
   
-  .plans-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 768px) {
