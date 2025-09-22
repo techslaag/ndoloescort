@@ -10,6 +10,7 @@ const isVerifying = ref(true)
 const paymentStatus = ref<'success' | 'failed' | 'pending'>('pending')
 const errorMessage = ref('')
 const transactionDetails = ref<any>(null)
+const isSubscriptionPayment = ref(false)
 
 onMounted(async () => {
   // Get transaction reference from query params
@@ -32,9 +33,17 @@ onMounted(async () => {
       paymentStatus.value = 'success'
       transactionDetails.value = verification.data
       
-      // Redirect to success page after 3 seconds
+      // Check if this was a subscription payment
+      const paymentRecord = await flutterwaveApiService.getTransactionByRef(tx_ref)
+      isSubscriptionPayment.value = paymentRecord?.type === 'subscription'
+      
+      // Redirect to appropriate page after 3 seconds
       setTimeout(() => {
-        router.push('/dashboard?payment=success')
+        if (isSubscriptionPayment.value) {
+          router.push('/subscription?upgraded=true')
+        } else {
+          router.push('/dashboard?payment=success')
+        }
       }, 3000)
     } else {
       paymentStatus.value = 'failed'
@@ -50,7 +59,11 @@ onMounted(async () => {
 })
 
 const goToDashboard = () => {
-  router.push('/dashboard')
+  if (isSubscriptionPayment.value) {
+    router.push('/subscription?upgraded=true')
+  } else {
+    router.push('/dashboard')
+  }
 }
 
 const retryPayment = () => {
@@ -74,7 +87,8 @@ const retryPayment = () => {
           <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
         </svg>
         <h2>Payment Successful!</h2>
-        <p>Your payment has been processed successfully.</p>
+        <p v-if="isSubscriptionPayment">Your subscription has been activated successfully!</p>
+        <p v-else>Your payment has been processed successfully.</p>
         
         <div v-if="transactionDetails" class="transaction-info">
           <div class="info-item">
@@ -91,7 +105,8 @@ const retryPayment = () => {
           </div>
         </div>
 
-        <p class="redirect-notice">Redirecting to dashboard in 3 seconds...</p>
+        <p class="redirect-notice" v-if="isSubscriptionPayment">Redirecting to your subscription page in 3 seconds...</p>
+        <p class="redirect-notice" v-else>Redirecting to dashboard in 3 seconds...</p>
         
         <button @click="goToDashboard" class="btn btn-primary">
           Go to Dashboard

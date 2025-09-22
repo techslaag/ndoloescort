@@ -9,6 +9,7 @@ import { useToast } from '../../composables/useToast'
 import ErrorAlert from '../../components/ErrorAlert.vue'
 import ProfileVerificationButton from '../../components/escort/ProfileVerificationButton.vue'
 import DeleteProfileModal from '../../components/modals/DeleteProfileModal.vue'
+import CreateProfileButton from '../../components/escort/CreateProfileButton.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -35,7 +36,7 @@ const isEscort = computed(() => userRole.value === 'escort')
 // Get unread message count for a specific profile
 const getUnreadCountForProfile = (profileId: string) => {
   // Filter conversations by profile
-  const profileConversations = messagingStore.conversations.filter(conv => {
+  const profileConversations = messagingStore.conversations.filter((conv: any) => {
     // Check if the conversation involves this specific profile
     // Look for conversations where the profileId is a participant with escort role
     return conv.participants.includes(profileId) && 
@@ -44,9 +45,9 @@ const getUnreadCountForProfile = (profileId: string) => {
   
   // Count unread messages across all conversations for this profile
   let unreadCount = 0
-  profileConversations.forEach(conv => {
+  profileConversations.forEach((conv: any) => {
     const messages = messagingStore.messages[conv.$id] || []
-    messages.forEach(msg => {
+    messages.forEach((msg: any) => {
       if (!msg.isRead && msg.senderId !== authStore.user?.$id) {
         unreadCount++
       }
@@ -176,29 +177,14 @@ const hasOnlyVideos = (profile: any) => {
   return profile.media.every((m: any) => m.type === 'video')
 }
 
-const canCreateNewProfile = computed(() => {
-  // Free plan users can only have 1 profile
-  if (subscriptionStore.isFreeTier && profileStore.profiles.length >= 1) {
-    return false
-  }
-  // Check general subscription limits
-  return subscriptionStore.canCreateProfile
-})
+// Note: canCreateNewProfile removed - now handled by CreateProfileButton component
 
-const createProfileButtonText = computed(() => {
-  if (!canCreateNewProfile.value) {
-    if (subscriptionStore.isFreeTier) {
-      return 'Upgrade to Create More'
-    }
-    return 'Profile Limit Reached'
-  }
-  return profileStore.profiles.length === 0 ? 'Create Your First Profile' : 'Create New Profile'
-})
+// Note: createProfileButtonText removed - now handled by CreateProfileButton component
 
 
 const viewAnalytics = (profileId: string) => {
   // This is just a safety check since the button should be disabled
-  const profile = profileStore.profiles.find(p => ((p as any).$id || p.id) === profileId)
+  const profile = profileStore.profiles.find((p: any) => (p.$id || p.id) === profileId)
   if (profile && profile.status !== 'active') {
     profileStore.setError('Analytics are only available for active profiles')
     return
@@ -233,37 +219,7 @@ const handleErrorClear = () => {
   profileStore.clearError()
 }
 
-const createNewProfile = async () => {
-  try {
-    // If user cannot create profile, go to subscription page
-    if (!canCreateNewProfile.value) {
-      router.push('/subscription')
-      return
-    }
-    
-    // Load subscription data first
-    await subscriptionStore.loadUserSubscription()
-    
-    // Double-check if user is on free plan and already has profiles
-    if (subscriptionStore.isFreeTier && profileStore.profiles.length >= 1) {
-      showError('Free plan allows only 1 profile. Please upgrade to create more profiles.')
-      router.push('/subscription')
-      return
-    }
-    
-    // Check general profile creation limits
-    if (!subscriptionStore.canCreateProfile) {
-      showError(`You have reached your profile limit. ${subscriptionStore.profilesRemaining} profiles remaining this month.`)
-      router.push('/subscription')
-      return
-    }
-    
-    router.push('/escort/profiles/create')
-  } catch (error) {
-    console.error('Error checking profile limits:', error)
-    showError('Unable to verify profile limits. Please try again.')
-  }
-}
+// Note: createNewProfile removed - now handled by CreateProfileButton component
 
 const showDeleteConfirmation = (profile: any) => {
   profileToDelete.value = profile
@@ -356,16 +312,7 @@ const closeDeleteModal = () => {
     
     <div class="profiles-header">
       <h1>My Profiles</h1>
-      <button 
-        @click="createNewProfile" 
-        class="btn btn-primary"
-        :title="!canCreateNewProfile ? 'Upgrade to create more profiles' : 'Create a new escort profile'"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-        </svg>
-        <span>{{ createProfileButtonText }}</span>
-      </button>
+      <CreateProfileButton size="md" variant="primary" />
     </div>
     
     <div v-if="profileStore.isLoading" class="loading">
@@ -375,16 +322,7 @@ const closeDeleteModal = () => {
     <div v-else-if="profileStore.profiles.length === 0" class="empty-state">
       <h3>No profiles yet</h3>
       <p>Create your first escort profile to start receiving bookings</p>
-      <button 
-        @click="createNewProfile" 
-        class="btn btn-primary"
-        :title="!canCreateNewProfile ? 'Upgrade to create more profiles' : 'Create your first escort profile'"
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-          <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
-        </svg>
-        <span>{{ createProfileButtonText }}</span>
-      </button>
+      <CreateProfileButton size="md" variant="primary" text="Create Your First Profile" />
     </div>
     
     <div v-else class="profiles-grid">

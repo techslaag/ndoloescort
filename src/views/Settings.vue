@@ -1,17 +1,27 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted, reactive, watch } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
+import { useProfileStore } from '../stores/profile'
+import { useSubscriptionStore } from '../stores/subscription'
 import { useToast } from '../composables/useToast'
 import { formatCurrency as formatCurrencyUtil } from '../utils/currency'
 import ErrorAlert from '../components/ErrorAlert.vue'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
+const profileStore = useProfileStore()
+const subscriptionStore = useSubscriptionStore()
 const { success, error: showError } = useToast()
 
 const isSaving = ref(false)
-const activeTab = ref('account')
+// Valid tab IDs
+const validTabs = ['account', 'subscription', 'security', 'preferences', 'privacy', 'billing', 'danger']
+
+// Initialize activeTab from query parameter or default to 'account'
+const initialTab = route.query.tab as string
+const activeTab = ref(validTabs.includes(initialTab) ? initialTab : 'account')
 const showDeleteConfirm = ref(false)
 const showPasswordForm = ref(false)
 // Removed old 2FA setup modal - now using dedicated VerificationCode page
@@ -55,6 +65,13 @@ const userRole = computed(() => {
 
 const isEscort = computed(() => userRole.value === 'escort')
 
+// Subscription related computed properties
+const currentSubscription = computed(() => subscriptionStore.currentSubscription)
+const currentPlan = computed(() => subscriptionStore.currentPlan)
+const currentUsage = computed(() => subscriptionStore.currentUsage)
+const isFreeTier = computed(() => subscriptionStore.isFreeTier)
+const daysUntilRenewal = computed(() => subscriptionStore.daysUntilRenewal)
+
 // Form data
 const accountForm = reactive({
   name: '',
@@ -78,8 +95,55 @@ const securityForm = reactive({
   ...DEFAULT_SECURITY
 })
 
+// Watch for query parameter changes and update active tab
+watch(() => route.query.tab, (newTab) => {
+  if (newTab && typeof newTab === 'string' && validTabs.includes(newTab)) {
+    // Check if tab is available for current user
+    const tab = tabs.find(t => t.id === newTab)
+    if (tab?.escortOnly && !isEscort.value) {
+      changeTab('account')
+    } else {
+      activeTab.value = newTab
+    }
+  } else if (!newTab) {
+    // If no tab parameter, default to account
+    activeTab.value = 'account'
+  }
+})
+
+// Function to change tab and update URL
+const changeTab = (tabId: string) => {
+  if (!validTabs.includes(tabId)) {
+    console.warn(`Invalid tab ID: ${tabId}`)
+    return
+  }
+  
+  // Check if tab is visible to current user
+  const tab = tabs.find(t => t.id === tabId)
+  if (tab?.escortOnly && !isEscort.value) {
+    console.warn(`Tab ${tabId} is restricted to escorts only`)
+    activeTab.value = 'account' // Fallback to account tab
+    router.replace({
+      query: { ...route.query, tab: 'account' }
+    })
+    return
+  }
+  
+  activeTab.value = tabId
+  // Update URL without triggering navigation
+  router.replace({
+    query: { ...route.query, tab: tabId }
+  })
+}
+
 // Initialize forms with user data
 onMounted(() => {
+  // Validate initial tab based on user role
+  const tab = tabs.find(t => t.id === activeTab.value)
+  if (tab?.escortOnly && !isEscort.value) {
+    changeTab('account') // Redirect to account tab if not authorized
+  }
+  
   if (authStore.user) {
     accountForm.name = authStore.user.name || ''
     accountForm.email = authStore.user.email || ''
@@ -134,6 +198,14 @@ onMounted(() => {
   if (isEscort.value) {
     loadBillingHistory()
   }
+  
+  // Load subscription data
+  subscriptionStore.loadUserSubscription()
+  
+  // Load profile data for escorts to get accurate profile count
+  if (isEscort.value) {
+    profileStore.fetchProfiles()
+  }
 })
 
 // Billing history functions
@@ -179,6 +251,7 @@ const formatTransactionType = (type: string) => {
 // Tab management
 const tabs = [
   { id: 'account', label: 'Account', icon: '👤' },
+  { id: 'subscription', label: 'Subscription', icon: '📋' },
   { id: 'security', label: 'Security', icon: '🔒' },
   { id: 'preferences', label: 'Preferences', icon: '⚙️' },
   { id: 'privacy', label: 'Privacy', icon: '🛡️' },
@@ -543,6 +616,62 @@ const goBack = () => {
   router.back()
 }
 
+// Subscription usage helper functions
+const getProfileUsage = () => {
+  const plan = currentPlan.value
+  if (!plan) {
+    return { used: 0, total: 0, remaining: 0, percentage: 0 }
+  }
+  
+  const totalAllowed = plan.features.profilesPerMonth
+  let used = 0
+  
+  if (currentUsage.value) {
+    used = currentUsage.value.profilesCreated
+  } else if (currentSubscription.value) {
+    used = currentSubscription.value.profilesCreatedThisMonth || 0
+  } else {
+    // Fallback: count actual profiles from profile store
+    used = profileStore.profiles?.length || 0
+  }
+  
+  const remaining = Math.max(0, totalAllowed - used)
+  const percentage = totalAllowed > 0 ? (used / totalAllowed) * 100 : 0
+  
+  return {
+    used,
+    total: totalAllowed,
+    remaining,
+    percentage: Math.min(100, percentage) // Cap at 100%
+  }
+}
+
+const getPremiumBoostsUsage = () => {
+  const plan = currentPlan.value
+  if (!plan || !plan.features.premiumBoosts.quantity) {
+    return { used: 0, total: 0, remaining: 0, percentage: 0 }
+  }
+  
+  const totalAllowed = plan.features.premiumBoosts.quantity
+  let used = 0
+  
+  if (currentUsage.value) {
+    used = currentUsage.value.premiumBoostsUsed
+  } else if (currentSubscription.value) {
+    used = currentSubscription.value.premiumBoostsUsedThisMonth || 0
+  }
+  
+  const remaining = Math.max(0, totalAllowed - used)
+  const percentage = totalAllowed > 0 ? (used / totalAllowed) * 100 : 0
+  
+  return {
+    used,
+    total: totalAllowed,
+    remaining,
+    percentage: Math.min(100, percentage) // Cap at 100%
+  }
+}
+
 
 // Send verification email
 const sendVerificationEmail = async () => {
@@ -611,7 +740,7 @@ const sendVerificationEmail = async () => {
           <button
             v-for="tab in visibleTabs"
             :key="tab.id"
-            @click="activeTab = tab.id"
+            @click="changeTab(tab.id)"
             :class="['nav-item', { active: activeTab === tab.id }]"
           >
             <span class="nav-icon">{{ tab.icon }}</span>
@@ -718,6 +847,152 @@ const sendVerificationEmail = async () => {
               </button>
             </div>
           </form>
+        </div>
+        
+        <!-- Subscription Tab -->
+        <div v-if="activeTab === 'subscription'" class="settings-section">
+          <div class="section-header">
+            <h2>Subscription & Usage</h2>
+            <p>View your current subscription details and usage statistics</p>
+          </div>
+          
+          <!-- Current Subscription Info -->
+          <div v-if="currentSubscription" class="subscription-info">
+            <div class="subscription-card">
+              <div class="subscription-header">
+                <h3>Current Plan</h3>
+                <span class="status-badge" :class="subscriptionStore.subscriptionStatus">
+                  {{ subscriptionStore.subscriptionStatus }}
+                </span>
+              </div>
+              
+              <div class="subscription-details">
+                <div class="detail-row">
+                  <span class="label">Plan:</span>
+                  <span class="value">{{ currentPlan?.name || 'Free' }}</span>
+                </div>
+                <div v-if="currentSubscription.tier !== 'free'" class="detail-row">
+                  <span class="label">Billing:</span>
+                  <span class="value">{{ currentSubscription.billingPeriod }}</span>
+                </div>
+                <div v-if="currentSubscription.tier !== 'free'" class="detail-row">
+                  <span class="label">Next renewal:</span>
+                  <span class="value">{{ daysUntilRenewal }} days</span>
+                </div>
+              </div>
+
+              <!-- Usage Stats -->
+              <div class="usage-stats">
+                <h4>Current Usage</h4>
+                <div class="usage-grid">
+                  <!-- Profile Usage -->
+                  <div class="usage-item">
+                    <div class="usage-header">
+                      <span class="usage-label">Profiles This Month</span>
+                      <span class="usage-status" :class="{ 'limit-reached': getProfileUsage().used >= getProfileUsage().total }">
+                        {{ getProfileUsage().used }} / {{ getProfileUsage().total }}
+                      </span>
+                    </div>
+                    <div class="usage-bar">
+                      <div 
+                        class="usage-fill" 
+                        :class="{ 'limit-reached': getProfileUsage().used >= getProfileUsage().total }"
+                        :style="{ width: `${getProfileUsage().percentage}%` }"
+                      ></div>
+                    </div>
+                    <div class="usage-details">
+                      <span v-if="getProfileUsage().remaining > 0" class="remaining-text">
+                        {{ getProfileUsage().remaining }} remaining
+                      </span>
+                      <span v-else class="limit-text">
+                        Limit reached
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <!-- Premium Boosts Usage -->
+                  <div v-if="getPremiumBoostsUsage().total > 0" class="usage-item">
+                    <div class="usage-header">
+                      <span class="usage-label">Premium Boosts</span>
+                      <span class="usage-status" :class="{ 'limit-reached': getPremiumBoostsUsage().used >= getPremiumBoostsUsage().total }">
+                        {{ getPremiumBoostsUsage().used }} / {{ getPremiumBoostsUsage().total }}
+                      </span>
+                    </div>
+                    <div class="usage-bar">
+                      <div 
+                        class="usage-fill premium" 
+                        :class="{ 'limit-reached': getPremiumBoostsUsage().used >= getPremiumBoostsUsage().total }"
+                        :style="{ width: `${getPremiumBoostsUsage().percentage}%` }"
+                      ></div>
+                    </div>
+                    <div class="usage-details">
+                      <span v-if="getPremiumBoostsUsage().remaining > 0" class="remaining-text">
+                        {{ getPremiumBoostsUsage().remaining }} remaining
+                      </span>
+                      <span v-else class="limit-text">
+                        All used
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <!-- Additional Usage Stats for Higher Tiers -->
+                  <div v-if="currentUsage && !isFreeTier" class="usage-stats-extended">
+                    <div class="stats-row">
+                      <div class="stat-item">
+                        <span class="stat-label">Messages Sent</span>
+                        <span class="stat-value">{{ currentUsage.messagesCount || 0 }}</span>
+                      </div>
+                      <div class="stat-item" v-if="currentPlan?.features.audioCall">
+                        <span class="stat-label">Audio Call Minutes</span>
+                        <span class="stat-value">{{ currentUsage.audioCallMinutes || 0 }}</span>
+                      </div>
+                      <div class="stat-item" v-if="currentPlan?.features.videoCall">
+                        <span class="stat-label">Video Call Minutes</span>
+                        <span class="stat-value">{{ currentUsage.videoCallMinutes || 0 }}</span>
+                      </div>
+                    </div>
+                    
+                    <div class="stats-row" v-if="currentPlan?.features.liveStreaming">
+                      <div class="stat-item">
+                        <span class="stat-label">Live Streaming Minutes</span>
+                        <span class="stat-value">{{ currentUsage.liveStreamingMinutes || 0 }}</span>
+                      </div>
+                      <div class="stat-item" v-if="currentPlan?.features.privateRoom">
+                        <span class="stat-label">Private Room Sessions</span>
+                        <span class="stat-value">{{ currentUsage.privateRoomSessions || 0 }}</span>
+                      </div>
+                      <div class="stat-item" v-if="currentPlan?.features.receiveGifts">
+                        <span class="stat-label">Gifts Received</span>
+                        <span class="stat-value">{{ currentUsage.giftsReceived || 0 }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- Subscription Actions -->
+              <div class="subscription-actions">
+                <router-link to="/subscription" class="btn btn-primary">
+                  Manage Subscription
+                </router-link>
+                <router-link v-if="isEscort && currentSubscription.tier === 'free'" to="/subscription" class="btn btn-outline">
+                  Upgrade Plan
+                </router-link>
+              </div>
+            </div>
+          </div>
+          
+          <!-- No Subscription State -->
+          <div v-else class="no-subscription">
+            <div class="empty-state">
+              <div class="empty-icon">📋</div>
+              <h4>No Active Subscription</h4>
+              <p>You don't have an active subscription yet.</p>
+              <router-link to="/subscription" class="btn btn-primary">
+                View Plans
+              </router-link>
+            </div>
+          </div>
         </div>
         
         <!-- Security Tab -->
@@ -2305,6 +2580,300 @@ const sendVerificationEmail = async () => {
     p {
       color: #047857;
       margin: 0;
+    }
+  }
+}
+
+/* Subscription Section Styles */
+.subscription-info {
+  .subscription-card {
+    background: var(--color-background-alt);
+    border: 1px solid var(--color-text-lighter);
+    border-radius: var(--border-radius-lg);
+    padding: var(--spacing-xl);
+    
+    .subscription-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: var(--spacing-lg);
+      
+      h3 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: var(--color-text-dark);
+      }
+      
+      .status-badge {
+        padding: 6px 12px;
+        border-radius: 12px;
+        font-size: 0.875rem;
+        font-weight: 500;
+        text-transform: capitalize;
+        
+        &.active {
+          background-color: #d1fae5;
+          color: #065f46;
+        }
+        
+        &.cancelled {
+          background-color: #fee2e2;
+          color: #dc2626;
+        }
+        
+        &.past_due {
+          background-color: #fef3c7;
+          color: #92400e;
+        }
+      }
+    }
+    
+    .subscription-details {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: var(--spacing-md);
+      margin-bottom: var(--spacing-xl);
+      
+      .detail-row {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-xs);
+        
+        .label {
+          font-size: 0.9rem;
+          color: var(--color-text-light);
+          font-weight: 500;
+        }
+        
+        .value {
+          font-size: 1.1rem;
+          color: var(--color-text-dark);
+          font-weight: 600;
+        }
+      }
+    }
+    
+    .usage-stats {
+      margin-top: var(--spacing-xl);
+      
+      h4 {
+        margin-bottom: var(--spacing-lg);
+        color: var(--color-text-dark);
+        font-size: 1.2rem;
+        font-weight: 600;
+      }
+      
+      .usage-grid {
+        display: flex;
+        flex-direction: column;
+        gap: var(--spacing-lg);
+      }
+      
+      .usage-item {
+        .usage-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: var(--spacing-xs);
+          
+          .usage-label {
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: var(--color-text-dark);
+          }
+          
+          .usage-status {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--color-text);
+            
+            &.limit-reached {
+              color: var(--color-danger);
+            }
+          }
+        }
+        
+        .usage-bar {
+          width: 100%;
+          height: 10px;
+          background: var(--color-text-lighter);
+          border-radius: 6px;
+          overflow: hidden;
+          margin-bottom: var(--spacing-xs);
+          
+          .usage-fill {
+            height: 100%;
+            background: var(--color-success);
+            transition: width 0.3s ease;
+            
+            &.premium {
+              background: linear-gradient(90deg, #ffd700, #ffed4e);
+            }
+            
+            &.limit-reached {
+              background: var(--color-danger);
+            }
+          }
+        }
+        
+        .usage-details {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          
+          .remaining-text {
+            font-size: 0.85rem;
+            color: var(--color-text-light);
+          }
+          
+          .limit-text {
+            font-size: 0.85rem;
+            color: var(--color-danger);
+            font-weight: 500;
+          }
+        }
+      }
+      
+      .usage-stats-extended {
+        margin-top: var(--spacing-lg);
+        padding-top: var(--spacing-lg);
+        border-top: 1px solid var(--color-text-lighter);
+        
+        .stats-row {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+          gap: var(--spacing-md);
+          margin-bottom: var(--spacing-md);
+          
+          &:last-child {
+            margin-bottom: 0;
+          }
+        }
+        
+        .stat-item {
+          display: flex;
+          flex-direction: column;
+          gap: var(--spacing-xs);
+          
+          .stat-label {
+            font-size: 0.8rem;
+            color: var(--color-text-light);
+            font-weight: 500;
+          }
+          
+          .stat-value {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--color-text-dark);
+          }
+        }
+      }
+    }
+    
+    .subscription-actions {
+      margin-top: var(--spacing-xl);
+      padding-top: var(--spacing-lg);
+      border-top: 1px solid var(--color-text-lighter);
+      display: flex;
+      gap: var(--spacing-md);
+      
+      @media (max-width: 480px) {
+        flex-direction: column;
+      }
+    }
+  }
+}
+
+.no-subscription {
+  .empty-state {
+    text-align: center;
+    padding: var(--spacing-xxl);
+    background: var(--color-background-alt);
+    border-radius: var(--border-radius-lg);
+    
+    .empty-icon {
+      font-size: 3rem;
+      margin-bottom: var(--spacing-md);
+      opacity: 0.5;
+    }
+    
+    h4 {
+      font-size: 1.2rem;
+      color: var(--color-text-dark);
+      margin-bottom: var(--spacing-sm);
+    }
+    
+    p {
+      color: var(--color-text-light);
+      margin-bottom: var(--spacing-lg);
+    }
+  }
+}
+
+/* Mobile responsive for subscription section */
+@media (max-width: 768px) {
+  .subscription-info {
+    .subscription-card {
+      padding: var(--spacing-lg);
+      
+      .subscription-details {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-sm);
+      }
+      
+      .usage-stats {
+        .usage-stats-extended {
+          .stats-row {
+            grid-template-columns: repeat(2, 1fr);
+            gap: var(--spacing-sm);
+          }
+          
+          .stat-item {
+            .stat-label {
+              font-size: 0.75rem;
+            }
+            
+            .stat-value {
+              font-size: 1rem;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@media (max-width: 480px) {
+  .subscription-info {
+    .subscription-card {
+      .subscription-header {
+        flex-direction: column;
+        gap: var(--spacing-sm);
+        text-align: center;
+      }
+      
+      .usage-stats {
+        .usage-stats-extended {
+          .stats-row {
+            grid-template-columns: 1fr;
+            gap: var(--spacing-xs);
+          }
+          
+          .stat-item {
+            padding: var(--spacing-sm);
+            background: var(--color-background);
+            border-radius: var(--border-radius-sm);
+            
+            .stat-label {
+              font-size: 0.7rem;
+            }
+            
+            .stat-value {
+              font-size: 0.9rem;
+            }
+          }
+        }
+      }
     }
   }
 }

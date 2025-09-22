@@ -1,4 +1,4 @@
-import { databases, DATABASE_ID, PAYMENTS_COLLECTION_ID, functions } from '../lib/appwrite'
+import { databases, DATABASE_ID, PAYMENTS_COLLECTION_ID, SUBSCRIPTIONS_COLLECTION_ID, functions } from '../lib/appwrite'
 import { ID, Query } from 'appwrite'
 import type { PaymentIntent } from './paymentService'
 
@@ -135,17 +135,9 @@ class FlutterwaveApiService {
   ): Promise<string> {
     try {
       // Calculate net amount (after platform fees)
-      const platformFeeRate = 0.20 // 20% platform fee
+      const platformFeeRate = 0.0 // 20% platform fee
       const platformFee = Math.round(paymentData.amount * platformFeeRate)
       const netAmount = paymentData.amount - platformFee
-
-      const paymentIntent: PaymentIntent = {
-        amount: paymentData.amount,
-        currency: paymentData.currency || 'USD',
-        clientId: '', // Will be set by caller
-        description: paymentData.description,
-        metadata: paymentData.metadata
-      }
 
       const transaction = await databases.createDocument(
         DATABASE_ID,
@@ -239,6 +231,11 @@ class FlutterwaveApiService {
           updatedAt: new Date().toISOString()
         }
       )
+
+      // If payment is successful and it's a subscription payment, create the subscription
+      if (verificationData.status === 'successful' && payment.type === 'subscription') {
+        await this.createSubscriptionFromPayment(payment, verificationData)
+      }
     } catch (error) {
       console.error('Error updating payment status:', error)
       throw error
@@ -272,7 +269,8 @@ class FlutterwaveApiService {
     userName: string,
     planId: string,
     amount: number,
-    currency: string = 'USD'
+    currency: string = 'USD',
+    billingPeriod: 'monthly' | 'annual' = 'monthly'
   ): Promise<FlutterwavePaymentResponse> {
     const paymentData: FlutterwavePaymentData = {
       amount,
@@ -285,6 +283,7 @@ class FlutterwaveApiService {
       metadata: {
         userId,
         planId,
+        billingPeriod,
         subscriptionType: planId
       }
     }
@@ -381,6 +380,110 @@ class FlutterwaveApiService {
       console.error('Error processing refund:', error)
       throw error
     }
+  }
+
+  // Create subscription from successful payment
+  private async createSubscriptionFromPayment(payment: any, verificationData: any): Promise<void> {
+    try {
+      // Parse payment metadata to get subscription details
+      const metadata = typeof payment.metadata === 'string' 
+        ? JSON.parse(payment.metadata) 
+        : payment.metadata
+
+      const userId = metadata.userId
+      const planId = metadata.planId
+      const billingPeriod = metadata.billingPeriod || 'monthly'
+
+      if (!userId || !planId) {
+        console.error('Missing userId or planId in payment metadata')
+        return
+      }
+
+      // Extract tier from planId (e.g., 'basic-monthly' -> 'basic', 'premium' -> 'premium')
+      const tier = this.getTierFromPlanId(planId)
+
+      // Check if user already has an active subscription
+      const existingSubscriptions = await databases.listDocuments(
+        DATABASE_ID,
+        SUBSCRIPTIONS_COLLECTION_ID,
+        [
+          Query.equal('userId', userId),
+          Query.equal('status', ['active', 'trialing'])
+        ]
+      )
+
+      // Cancel existing subscriptions
+      for (const sub of existingSubscriptions.documents) {
+        await databases.updateDocument(
+          DATABASE_ID,
+          SUBSCRIPTIONS_COLLECTION_ID,
+          sub.$id,
+          {
+            status: 'cancelled',
+            cancelledAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          }
+        )
+      }
+
+      // Calculate subscription dates
+      const startDate = new Date()
+      const endDate = new Date()
+      if (billingPeriod === 'monthly') {
+        endDate.setMonth(endDate.getMonth() + 1)
+      } else {
+        endDate.setFullYear(endDate.getFullYear() + 1)
+      }
+
+      // Create new subscription
+      const subscriptionId = ID.unique()
+      await databases.createDocument(
+        DATABASE_ID,
+        SUBSCRIPTIONS_COLLECTION_ID,
+        subscriptionId,
+        {
+          userId,
+          planId: tier, // Use tier as planId (e.g., 'basic', 'premium', 'elite')
+          tier: tier,
+          billingPeriod,
+          status: 'active',
+          currentPeriodStart: startDate.toISOString(),
+          currentPeriodEnd: endDate.toISOString(),
+          cancelAtPeriodEnd: false,
+          lastPaymentId: payment.$id,
+          lastPaymentAmount: payment.amount,
+          nextPaymentAmount: payment.amount,
+          profilesCreatedThisMonth: 0,
+          premiumBoostsUsedThisMonth: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }
+      )
+
+      console.log(`Subscription created successfully for user ${userId} with tier ${tier}`)
+    } catch (error) {
+      console.error('Error creating subscription from payment:', error)
+      // Don't throw - we don't want to fail the payment verification if subscription creation fails
+    }
+  }
+
+  // Helper to get tier from plan ID
+  private getTierFromPlanId(planId: string): string {
+    // Map plan IDs to tiers
+    const planTiers: Record<string, string> = {
+      'free': 'free',
+      'basic': 'basic',
+      'premium': 'premium',
+      'elite': 'elite',
+      'basic-monthly': 'basic',
+      'basic-annual': 'basic',
+      'premium-monthly': 'premium',
+      'premium-annual': 'premium',
+      'elite-monthly': 'elite',
+      'elite-annual': 'elite'
+    }
+    
+    return planTiers[planId] || 'free'
   }
 
   // Get banks list for transfers (removed - not needed for basic payment flow)

@@ -6,6 +6,7 @@ import { useProfileStore } from '../../stores/profile'
 import { useNotificationStore } from '../../stores/notification'
 import { formatCurrency } from '../../utils/currency'
 import ErrorAlert from '../../components/ErrorAlert.vue'
+import CreateProfileButton from '../../components/escort/CreateProfileButton.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -54,22 +55,20 @@ const stats = computed(() => {
   const profiles = profileStore.profiles || []
   return {
     totalProfiles: profiles.length,
-    activeProfiles: profiles.filter(p => p.status === 'active').length,
-    totalViews: profiles.reduce((total, p) => {
+    activeProfiles: profiles.filter((p: any) => p.status === 'active').length,
+    totalViews: profiles.reduce((total: number, p: any) => {
       // Handle different possible property names
-      const views = (p as any).statsViews || (p as any).stats?.views || 0
+      const views = p.statsViews || p.stats?.views || 0
       return total + views
     }, 0),
-    totalBookings: profiles.reduce((total, p) => {
+    totalBookings: profiles.reduce((total: number, p: any) => {
       // Handle different possible property names
-      const bookings = (p as any).statsBookings || (p as any).stats?.bookings || 0
+      const bookings = p.statsBookings || p.stats?.bookings || 0
       return total + bookings
     }, 0),
     boostedProfiles: profileStore.boostedProfiles?.length || 0
   }
 })
-
-const profiles = computed(() => profileStore.profiles || [])
 
 // User role computed properties
 const userRole = computed(() => {
@@ -229,9 +228,6 @@ const navigateToProfiles = () => {
   router.push('/escort/profiles')
 }
 
-const createNewProfile = () => {
-  router.push('/escort/profiles/create')
-}
 
 const getActivityIcon = (type: string) => {
   switch (type) {
@@ -267,10 +263,8 @@ const formatTime = (timestamp: string) => {
   }
 }
 
-const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') => {
-  console.log(`${action} booking ${bookingId}`)
-  // TODO: Implement booking action logic
-}
+// Note: handleBookingAction removed as it's not currently used
+// Can be re-added when booking action functionality is implemented
 </script>
 
 <template>
@@ -294,9 +288,7 @@ const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') =>
         <button @click="navigateToProfiles" class="btn btn-outline">
           View All Profiles
         </button>
-        <button @click="createNewProfile" class="btn btn-primary">
-          Create New Profile
-        </button>
+        <CreateProfileButton size="md" variant="primary" />
       </div>
     </div>
     
@@ -314,9 +306,7 @@ const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') =>
             <div class="step-content">
               <h4>Create Your Profile</h4>
               <p>Add photos, description, and services</p>
-              <button @click="createNewProfile" class="btn btn-primary btn-sm">
-                Create Profile
-              </button>
+              <CreateProfileButton size="sm" variant="primary" text="Create Profile" />
             </div>
           </div>
           
@@ -377,61 +367,6 @@ const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') =>
           <div class="stat-content">
             <h3>{{ stats.boostedProfiles }}</h3>
             <p>Boosted Profiles</p>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Recent Profiles -->
-      <div class="profiles-section">
-        <div class="section-header">
-          <h2>Your Profiles</h2>
-          <button @click="navigateToProfiles" class="btn btn-text">View All</button>
-        </div>
-        
-        <div v-if="isLoading" class="loading-state">
-          <div class="spinner"></div>
-          <p>Loading your profiles...</p>
-        </div>
-        
-        <div v-else-if="profiles.length === 0" class="empty-state">
-          <div class="empty-icon">👤</div>
-          <h3>No profiles yet</h3>
-          <p>Create your first escort profile to start receiving bookings</p>
-          <button @click="createNewProfile" class="btn btn-primary">
-            Create Your First Profile
-          </button>
-        </div>
-        
-        <div v-else class="profiles-grid">
-          <div 
-            v-for="profile in profiles.slice(0, 3)" 
-            :key="profile.id || (profile as any).$id"
-            class="profile-card"
-            @click="router.push(`/escort/profiles/${(profile as any).$id || profile.id}`)""
-          >
-            <div class="profile-header">
-              <h3>{{ profile.name }}</h3>
-              <span :class="['status-badge', profile.status]">
-                {{ profile.status }}
-              </span>
-            </div>
-            
-            <div class="profile-stats">
-              <div class="stat">
-                <span class="stat-label">Views:</span>
-                <span class="stat-value">{{ (profile as any).statsViews || (profile as any).stats?.views || 0 }}</span>
-              </div>
-              <div class="stat">
-                <span class="stat-label">Rating:</span>
-                <span class="stat-value">{{ (((profile as any).statsRating || (profile as any).stats?.rating || 0)).toFixed(1) }}★</span>
-              </div>
-            </div>
-            
-            <div class="profile-footer">
-              <span class="last-updated">
-                Updated: {{ new Date(profile.updatedAt || profile.createdAt).toLocaleDateString() }}
-              </span>
-            </div>
           </div>
         </div>
       </div>
@@ -520,11 +455,12 @@ const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') =>
         <div class="dashboard-section quick-actions">
           <h2>⚡ Quick Actions</h2>
           <div class="actions-grid">
-            <button @click="createNewProfile" class="action-card">
+            <div class="action-card-wrapper">
+              <CreateProfileButton size="lg" variant="text" :icon="false" text="Create Profile" />
               <div class="action-icon">➕</div>
               <h3>Create Profile</h3>
               <p>Add a new escort profile</p>
-            </button>
+            </div>
             
             <button @click="router.push('/messages')" class="action-card">
               <div class="action-icon">💬</div>
@@ -1004,6 +940,61 @@ const handleBookingAction = (bookingId: string, action: 'accept' | 'decline') =>
     color: var(--color-text-light);
     margin: 0;
     font-size: 0.7rem;
+  }
+}
+
+.action-card-wrapper {
+  background: white;
+  border: 1px solid var(--color-text-lighter);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-md);
+  text-align: center;
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100px;
+  position: relative;
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    border-color: var(--color-accent);
+  }
+  
+  .action-icon {
+    font-size: 1.5rem;
+    margin-bottom: var(--spacing-xs);
+  }
+  
+  h3 {
+    color: var(--color-text-dark);
+    margin-bottom: var(--spacing-xs);
+    font-size: 0.9rem;
+  }
+  
+  p {
+    color: var(--color-text-light);
+    margin: 0;
+    font-size: 0.7rem;
+  }
+  
+  // Position the CreateProfileButton to fill the entire card
+  .create-profile-btn {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: transparent !important;
+    border: none !important;
+    color: transparent !important;
+    z-index: 2;
+    
+    span {
+      opacity: 0;
+    }
   }
 }
 

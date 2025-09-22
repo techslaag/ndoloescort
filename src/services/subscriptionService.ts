@@ -4,7 +4,8 @@ import {
   DATABASE_ID,
   SUBSCRIPTIONS_COLLECTION_ID,
   SUBSCRIPTION_USAGE_COLLECTION_ID,
-  SUBSCRIPTION_INVOICES_COLLECTION_ID
+  SUBSCRIPTION_INVOICES_COLLECTION_ID,
+  PROFILES_COLLECTION_ID
 } from '../lib/appwrite'
 import { Query } from 'appwrite'
 import { paymentService } from './paymentService'
@@ -69,6 +70,9 @@ class SubscriptionService {
     const endDate = new Date()
     endDate.setMonth(endDate.getMonth() + 1) // Free tier renews monthly
 
+    // Count existing active profiles for this user
+    const existingProfilesCount = await this.countExistingActiveProfiles(userId)
+
     const documentId = ID.unique()
     const subscriptionData = {
       userId,
@@ -81,7 +85,7 @@ class SubscriptionService {
       cancelAtPeriodEnd: false,
       lastPaymentAmount: 0,
       nextPaymentAmount: 0,
-      profilesCreatedThisMonth: 0,
+      profilesCreatedThisMonth: existingProfilesCount,
       premiumBoostsUsedThisMonth: 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -124,6 +128,9 @@ class SubscriptionService {
 
       // For free tier, no payment needed
       if (plan.tier === 'free') {
+        // Count existing active profiles for this user
+        const existingProfilesCount = await this.countExistingActiveProfiles(userId)
+
         const documentId = ID.unique()
         const subscriptionData = {
           userId,
@@ -136,7 +143,7 @@ class SubscriptionService {
           cancelAtPeriodEnd: false,
           lastPaymentAmount: 0,
           nextPaymentAmount: 0,
-          profilesCreatedThisMonth: 0,
+          profilesCreatedThisMonth: existingProfilesCount,
           premiumBoostsUsedThisMonth: 0,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
@@ -169,6 +176,9 @@ class SubscriptionService {
         }
       })
 
+      // Count existing active profiles for this user
+      const existingProfilesCount = await this.countExistingActiveProfiles(userId)
+
       // Create subscription with pending status
       const documentId = ID.unique()
       const subscriptionData = {
@@ -185,7 +195,7 @@ class SubscriptionService {
         lastPaymentAmount: amount,
         nextPaymentDate: endDate.toISOString(),
         nextPaymentAmount: amount,
-        profilesCreatedThisMonth: 0,
+        profilesCreatedThisMonth: existingProfilesCount,
         premiumBoostsUsedThisMonth: 0,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -321,6 +331,60 @@ class SubscriptionService {
       return this.mapDocumentToSubscription(updated)
     } catch (error) {
       console.error('Error cancelling subscription:', error)
+      throw error
+    }
+  }
+
+  // Revoke subscription cancellation (reactivate subscription)
+  async revokeSubscriptionCancellation(subscriptionId: string): Promise<UserSubscription> {
+    try {
+      // Get current subscription to verify it's cancelled
+      const subscription = await databases.getDocument(
+        DATABASE_ID,
+        SUBSCRIPTIONS_COLLECTION_ID,
+        subscriptionId
+      )
+
+      if (!subscription.cancelAtPeriodEnd) {
+        throw new Error('Subscription is not scheduled for cancellation')
+      }
+
+      if (subscription.status === 'cancelled') {
+        throw new Error('Subscription is already cancelled and cannot be reactivated')
+      }
+
+      // Check if we're still within the current period
+      const currentPeriodEnd = new Date(subscription.currentPeriodEnd)
+      const now = new Date()
+      
+      if (now >= currentPeriodEnd) {
+        throw new Error('Subscription period has already ended')
+      }
+
+      // Reactivate the subscription by setting cancelAtPeriodEnd to false
+      const updates: any = {
+        cancelAtPeriodEnd: false,
+        updatedAt: new Date().toISOString()
+      }
+
+      // Remove cancellation-related fields
+      if (subscription.cancelledAt) {
+        updates.cancelledAt = null
+      }
+      if (subscription.cancellationReason) {
+        updates.cancellationReason = null
+      }
+
+      const updated = await databases.updateDocument(
+        DATABASE_ID,
+        SUBSCRIPTIONS_COLLECTION_ID,
+        subscriptionId,
+        updates
+      )
+
+      return this.mapDocumentToSubscription(updated)
+    } catch (error) {
+      console.error('Error revoking subscription cancellation:', error)
       throw error
     }
   }
@@ -463,12 +527,19 @@ class SubscriptionService {
       throw new Error('Invalid subscription plan')
     }
 
+    // Count existing active profiles for this user
+    const existingProfilesCount = await this.countExistingActiveProfiles(userId)
+
+    // Ensure we don't exceed the plan limit
+    const profilesCreated = Math.min(existingProfilesCount, plan.features.profilesPerMonth)
+    const profilesRemaining = Math.max(0, plan.features.profilesPerMonth - profilesCreated)
+
     const usage: SubscriptionUsage = {
       userId,
       subscriptionId,
       period: this.getCurrentPeriod(),
-      profilesCreated: 0,
-      profilesRemaining: plan.features.profilesPerMonth,
+      profilesCreated,
+      profilesRemaining,
       premiumBoostsUsed: 0,
       premiumBoostsRemaining: plan.features.premiumBoosts.quantity,
       messagesCount: 0,
@@ -497,6 +568,24 @@ class SubscriptionService {
   private getCurrentPeriod(): string {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  }
+
+  // Helper function to count existing active profiles for a user
+  private async countExistingActiveProfiles(userId: string): Promise<number> {
+    try {
+      const profilesResponse = await databases.listDocuments(
+        DATABASE_ID,
+        PROFILES_COLLECTION_ID,
+        [
+          Query.equal('userId', userId),
+          Query.equal('status', 'active')
+        ]
+      )
+      return profilesResponse.total
+    } catch (error) {
+      console.warn('Could not count existing profiles, defaulting to 0:', error)
+      return 0
+    }
   }
 
   private determineChangeType(currentPlan: SubscriptionPlan, newPlan: SubscriptionPlan): 'upgrade' | 'downgrade' | 'billing_period_change' {

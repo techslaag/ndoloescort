@@ -41,13 +41,33 @@ export const useSubscriptionStore = defineStore('subscription', () => {
   })
 
   const canCreateProfile = computed(() => {
-    if (!currentUsage.value) return true // Default to true for free tier if no usage data
+    if (!currentSubscription.value) return false // No subscription means no access
+    
+    const plan = getSubscriptionPlan(currentSubscription.value.tier)
+    if (!plan) return false
+    
+    // If we don't have usage data, we need to be conservative
+    if (!currentUsage.value) {
+      // For users without usage data, only allow profile creation if they have 0 profiles this month
+      const profilesCreatedThisMonth = currentSubscription.value.profilesCreatedThisMonth || 0
+      return profilesCreatedThisMonth < plan.features.profilesPerMonth
+    }
+    
     return currentUsage.value.profilesRemaining > 0
   })
 
   const profilesRemaining = computed(() => {
-    // For free tier, default to 1 profile if no usage data
-    if (!currentUsage.value && isFreeTier.value) return 1
+    if (!currentSubscription.value) return 0
+    
+    const plan = getSubscriptionPlan(currentSubscription.value.tier)
+    if (!plan) return 0
+    
+    if (!currentUsage.value) {
+      // Calculate remaining profiles based on subscription data
+      const profilesCreatedThisMonth = currentSubscription.value.profilesCreatedThisMonth || 0
+      return Math.max(0, plan.features.profilesPerMonth - profilesCreatedThisMonth)
+    }
+    
     return currentUsage.value?.profilesRemaining || 0
   })
 
@@ -199,6 +219,34 @@ export const useSubscriptionStore = defineStore('subscription', () => {
     }
   }
 
+  const revokeSubscriptionCancellation = async () => {
+    try {
+      isLoading.value = true
+      error.value = null
+
+      if (!currentSubscription.value) {
+        throw new Error('No active subscription found')
+      }
+
+      if (!currentSubscription.value.cancelAtPeriodEnd) {
+        throw new Error('Subscription is not scheduled for cancellation')
+      }
+
+      const updated = await subscriptionService.revokeSubscriptionCancellation(
+        currentSubscription.value.id
+      )
+
+      currentSubscription.value = updated
+      return updated
+    } catch (err: any) {
+      console.error('Error revoking subscription cancellation:', err)
+      error.value = err.message || 'Failed to revoke subscription cancellation'
+      throw err
+    } finally {
+      isLoading.value = false
+    }
+  }
+
   const checkFeatureAccess = async (feature: string): Promise<boolean> => {
     try {
       const authStore = useAuthStore()
@@ -316,6 +364,7 @@ export const useSubscriptionStore = defineStore('subscription', () => {
     createSubscription,
     updateSubscription,
     cancelSubscription,
+    revokeSubscriptionCancellation,
     checkFeatureAccess,
     incrementProfileUsage,
     loadInvoices,

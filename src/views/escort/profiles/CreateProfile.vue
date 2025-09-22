@@ -341,18 +341,31 @@ onMounted(async () => {
       // Load user's existing profiles to check limits
       await profileStore.fetchProfiles()
       
-      // Check if user is on free plan and already has a profile
-      if (subscriptionStore.isFreeTier && profileStore.profiles.length >= 1) {
-        authStore.setError('Free plan allows only 1 profile. Please upgrade your subscription to create more profiles.')
+      // Get current plan and check limits
+      const currentPlan = subscriptionStore.currentPlan
+      if (!currentPlan) {
+        authStore.setError('Unable to determine your subscription plan. Please try again.')
         setTimeout(() => {
           router.push('/subscription')
         }, 3000)
         return
       }
       
-      // Check general profile creation limits
+      const currentProfileCount = profileStore.profiles.length
+      const planLimit = currentPlan.features.profilesPerMonth
+      
+      // Check if user has reached their plan limit
+      if (currentProfileCount >= planLimit) {
+        authStore.setError(`${currentPlan.name} plan allows only ${planLimit} profile${planLimit > 1 ? 's' : ''} per month. You currently have ${currentProfileCount}. Please upgrade to create more profiles.`)
+        setTimeout(() => {
+          router.push('/subscription')
+        }, 3000)
+        return
+      }
+      
+      // Check general profile creation limits from subscription store
       if (!subscriptionStore.canCreateProfile) {
-        authStore.setError(`You have reached your monthly profile creation limit. You have ${subscriptionStore.profilesRemaining} profiles remaining this month. Please upgrade your subscription to create more profiles.`)
+        authStore.setError(`You have reached your monthly profile creation limit. You have ${subscriptionStore.profilesRemaining} profiles remaining this month.`)
         setTimeout(() => {
           router.push('/subscription')
         }, 3000)

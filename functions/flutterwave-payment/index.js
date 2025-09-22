@@ -52,10 +52,12 @@ export default async ({ req, res, log, error }) => {
           amount: data.amount,
           currency: data.currency || 'USD',
           redirect_url: data.redirect_url,
-          payment_options: 'card,account,banktransfer,ussd,credit,mpesa,mobilemoneyghana,mobilemoneyfranco,mobilemoneyuganda,mobilemoneyrwanda,mobilemoneyzambia,mobilemoneytanzania,barter,qr,enaira',
+          payment_options: 'mobilemoneyfranco,card',
+          // payment_options: 'card,account,banktransfer,ussd,credit,mpesa,mobilemoneyghana,mobilemoneyfranco,mobilemoneyuganda,mobilemoneyrwanda,mobilemoneyzambia,mobilemoneytanzania,barter,qr,enaira',
           customer: {
             email: data.customer.email,
-            phonenumber: data.customer.phone || '',
+            // phonenumber: data.customer.phone || '',
+            phonenumber: '+237681839583',
             name: data.customer.name
           },
           customizations: {

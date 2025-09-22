@@ -18,14 +18,17 @@ const selectedBillingPeriod = ref<BillingPeriod>('monthly')
 const showPayment = ref(false)
 const showCancelModal = ref(false)
 const cancellationReason = ref('')
+const isCancelling = ref(false)
 const showUpgradeModal = ref(false)
 const upgradePlan = ref<SubscriptionPlan | null>(null)
+const showDowngradeModal = ref(false)
+const downgradePlan = ref<SubscriptionPlan | null>(null)
+const isProcessingDowngrade = ref(false)
 const paymentRef = ref<InstanceType<typeof FlutterwaveApiPayment>>()
 
 const plans = computed(() => SUBSCRIPTION_PLANS)
 const currentSubscription = computed(() => subscriptionStore.currentSubscription)
 const currentPlan = computed(() => subscriptionStore.currentPlan)
-const currentUsage = computed(() => subscriptionStore.currentUsage)
 const daysUntilRenewal = computed(() => subscriptionStore.daysUntilRenewal)
 
 const isAuthenticated = computed(() => authStore.isAuthenticated)
@@ -75,10 +78,16 @@ const selectPlan = (plan: SubscriptionPlan) => {
 
   selectedPlan.value = plan
   
-  // For upgrades, show upgrade modal
   if (currentSubscription.value && plan.tier !== currentSubscription.value.tier) {
-    upgradePlan.value = plan
-    showUpgradeModal.value = true
+    if (isUpgrade(plan)) {
+      // For upgrades, show upgrade modal
+      upgradePlan.value = plan
+      showUpgradeModal.value = true
+    } else if (isDowngrade(plan)) {
+      // For downgrades, show warning modal
+      downgradePlan.value = plan
+      showDowngradeModal.value = true
+    }
   } else if (!currentSubscription.value || currentSubscription.value.tier === 'free') {
     // New subscription
     showPayment.value = true
@@ -88,6 +97,39 @@ const selectPlan = (plan: SubscriptionPlan) => {
 const proceedWithUpgrade = () => {
   showUpgradeModal.value = false
   showPayment.value = true
+}
+
+const proceedWithDowngrade = async () => {
+  try {
+    if (!downgradePlan.value || !currentSubscription.value) return
+    
+    isProcessingDowngrade.value = true
+    showDowngradeModal.value = false
+    
+    // Process downgrade immediately without payment
+    await subscriptionStore.updateSubscription(
+      downgradePlan.value.id,
+      selectedBillingPeriod.value
+    )
+    
+    // Reset states
+    selectedPlan.value = null
+    downgradePlan.value = null
+    
+    // Reload subscription data
+    await loadSubscriptionData()
+    
+  } catch (error) {
+    console.error('Error processing downgrade:', error)
+  } finally {
+    isProcessingDowngrade.value = false
+  }
+}
+
+const cancelDowngrade = () => {
+  showDowngradeModal.value = false
+  downgradePlan.value = null
+  selectedPlan.value = null
 }
 
 const handlePaymentSuccess = async (response: any) => {
@@ -133,14 +175,37 @@ const handlePaymentError = (err: Error) => {
 
 const cancelSubscription = async () => {
   try {
+    isCancelling.value = true
     await subscriptionStore.cancelSubscription(cancellationReason.value, false)
     showCancelModal.value = false
     cancellationReason.value = ''
+    
+    // Show success notification
+    subscriptionStore.error = null
     
     // Reload subscription data
     await loadSubscriptionData()
   } catch (error) {
     console.error('Error cancelling subscription:', error)
+  } finally {
+    isCancelling.value = false
+  }
+}
+
+const reactivateSubscription = async () => {
+  try {
+    isLoading.value = true
+    await subscriptionStore.revokeSubscriptionCancellation()
+    
+    // Show success notification
+    subscriptionStore.error = null
+    
+    // Reload subscription data
+    await loadSubscriptionData()
+  } catch (error) {
+    console.error('Error reactivating subscription:', error)
+  } finally {
+    isLoading.value = false
   }
 }
 
@@ -161,24 +226,6 @@ const getSavings = (plan: SubscriptionPlan): number => {
   return convertFromUSD(plan.yearlyDiscount, userCurrency.value)
 }
 
-const formatFeature = (feature: string): string => {
-  const replacements: Record<string, string> = {
-    'profilesPerMonth': 'Profiles per month',
-    'premiumBoosts': 'Premium boosts',
-    'messaging': 'Messaging',
-    'audioCall': 'Audio calls',
-    'videoCall': 'Video calls',
-    'liveStreaming': 'Live streaming',
-    'privateRoom': 'Private room',
-    'receiveGifts': 'Receive gifts',
-    'callRevenue': 'Keep call revenue',
-    'blissescortReward': 'BlissEscort rewards',
-    'supportLevel': 'Support level',
-    'proFlag': 'Pro badge'
-  }
-  
-  return replacements[feature] || feature
-}
 
 const isCurrentPlan = (plan: SubscriptionPlan): boolean => {
   return currentSubscription.value?.tier === plan.tier
@@ -191,8 +238,30 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
   const currentIndex = tierOrder.indexOf(currentSubscription.value.tier)
   const planIndex = tierOrder.indexOf(plan.tier)
   
+  // Allow both upgrades and downgrades, but not same tier
+  return planIndex !== currentIndex
+}
+
+const isUpgrade = (plan: SubscriptionPlan): boolean => {
+  if (!currentSubscription.value) return false
+  
+  const tierOrder = ['free', 'starter', 'pro', 'agency']
+  const currentIndex = tierOrder.indexOf(currentSubscription.value.tier)
+  const planIndex = tierOrder.indexOf(plan.tier)
+  
   return planIndex > currentIndex
 }
+
+const isDowngrade = (plan: SubscriptionPlan): boolean => {
+  if (!currentSubscription.value) return false
+  
+  const tierOrder = ['free', 'starter', 'pro', 'agency']
+  const currentIndex = tierOrder.indexOf(currentSubscription.value.tier)
+  const planIndex = tierOrder.indexOf(plan.tier)
+  
+  return planIndex < currentIndex
+}
+
 </script>
 
 <template>
@@ -245,77 +314,39 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
         </div>
       </div>
 
-      <!-- Current Subscription Info -->
-      <div v-if="currentSubscription && currentSubscription.tier !== 'free'" class="current-subscription">
-        <div class="subscription-card">
-          <div class="subscription-header">
-            <h3>Current Subscription</h3>
+      <!-- Current Subscription Quick Info -->
+      <div v-if="currentSubscription && currentSubscription.tier !== 'free'" class="current-subscription-notice">
+        <div class="notice-card">
+          <div class="notice-content">
+            <h4>Current Plan: {{ currentPlan?.name }}</h4>
+            <p>Next renewal in {{ daysUntilRenewal }} days</p>
             <span class="status-badge" :class="subscriptionStore.subscriptionStatus">
               {{ subscriptionStore.subscriptionStatus }}
             </span>
           </div>
-          
-          <div class="subscription-details">
-            <div class="detail-row">
-              <span class="label">Plan:</span>
-              <span class="value">{{ currentPlan?.name }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="label">Billing:</span>
-              <span class="value">{{ currentSubscription.billingPeriod }}</span>
-            </div>
-            <div class="detail-row">
-              <span class="label">Next renewal:</span>
-              <span class="value">{{ daysUntilRenewal }} days</span>
-            </div>
-          </div>
-
-          <!-- Usage Stats -->
-          <div v-if="currentUsage" class="usage-stats">
-            <h4>Current Usage</h4>
-            <div class="usage-grid">
-              <div class="usage-item">
-                <span class="usage-label">Profiles</span>
-                <div class="usage-bar">
-                  <div 
-                    class="usage-fill" 
-                    :style="{ width: `${(currentUsage.profilesCreated / (currentUsage.profilesCreated + currentUsage.profilesRemaining)) * 100}%` }"
-                  ></div>
-                </div>
-                <span class="usage-text">
-                  {{ currentUsage.profilesCreated }} / {{ currentUsage.profilesCreated + currentUsage.profilesRemaining }}
-                </span>
-              </div>
-              
-              <div v-if="currentUsage.premiumBoostsRemaining > 0" class="usage-item">
-                <span class="usage-label">Premium Boosts</span>
-                <div class="usage-bar">
-                  <div 
-                    class="usage-fill premium" 
-                    :style="{ width: `${(currentUsage.premiumBoostsUsed / (currentUsage.premiumBoostsUsed + currentUsage.premiumBoostsRemaining)) * 100}%` }"
-                  ></div>
-                </div>
-                <span class="usage-text">
-                  {{ currentUsage.premiumBoostsUsed }} / {{ currentUsage.premiumBoostsUsed + currentUsage.premiumBoostsRemaining }}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div class="subscription-actions">
+          <div class="notice-actions">
+            <router-link to="/settings?tab=subscription" class="btn btn-outline btn-sm">
+              View Details
+            </router-link>
             <button 
               v-if="!currentSubscription.cancelAtPeriodEnd"
               @click="showCancelModal = true" 
-              class="btn btn-outline"
+              class="btn btn-outline btn-sm"
             >
-              Cancel Subscription
+              Cancel
             </button>
-            <div v-else class="cancellation-notice">
-              Subscription will end on {{ new Date(currentSubscription.currentPeriodEnd).toLocaleDateString() }}
-            </div>
+            <button 
+              v-if="currentSubscription.cancelAtPeriodEnd"
+              @click="reactivateSubscription" 
+              class="btn btn-primary btn-sm"
+              :disabled="isLoading"
+            >
+              Reactivate
+            </button>
           </div>
         </div>
       </div>
+
 
       <!-- Loading State -->
       <div v-if="isLoading" class="loading-state">
@@ -433,7 +464,11 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
               class="btn btn-primary btn-full"
               :disabled="!canSelectPlan(plan)"
             >
-              {{ canSelectPlan(plan) ? 'Select Plan' : 'Downgrade Not Available' }}
+              {{ 
+                canSelectPlan(plan) 
+                  ? (isUpgrade(plan) ? 'Upgrade' : isDowngrade(plan) ? 'Downgrade' : 'Select Plan')
+                  : 'Not Available' 
+              }}
             </button>
             <div v-else class="current-plan-label">
               Your Current Plan
@@ -551,24 +586,56 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
     <div v-if="showCancelModal" class="modal-overlay" @click.self="showCancelModal = false">
       <div class="modal-content">
         <h2>Cancel Subscription</h2>
-        <p>Are you sure you want to cancel your subscription? You'll keep access until the end of your current billing period.</p>
+        <div class="cancellation-info">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="warning-icon">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="12"></line>
+            <line x1="12" y1="16" x2="12.01" y2="16"></line>
+          </svg>
+          <p>Are you sure you want to cancel your <strong>{{ currentPlan?.name }}</strong> subscription?</p>
+        </div>
+        
+        <div class="cancellation-details">
+          <h4>What happens when you cancel:</h4>
+          <ul>
+            <li>You'll keep access to {{ currentPlan?.name }} features until {{ new Date(currentSubscription?.currentPeriodEnd || '').toLocaleDateString() }}</li>
+            <li>Your subscription won't renew automatically</li>
+            <li>You can resubscribe anytime before the period ends</li>
+          </ul>
+        </div>
         
         <div class="form-group">
-          <label for="reason">Reason for cancellation (optional)</label>
-          <textarea 
+          <label for="reason">Help us improve (optional)</label>
+          <select 
             id="reason"
             v-model="cancellationReason"
-            rows="4"
-            placeholder="Help us improve by telling us why you're leaving..."
-          ></textarea>
+            :disabled="isCancelling"
+          >
+            <option value="">Select a reason...</option>
+            <option value="too_expensive">Too expensive</option>
+            <option value="not_using_enough">Not using it enough</option>
+            <option value="missing_features">Missing features I need</option>
+            <option value="found_alternative">Found a better alternative</option>
+            <option value="temporary_break">Just taking a break</option>
+            <option value="other">Other reason</option>
+          </select>
         </div>
         
         <div class="modal-actions">
-          <button @click="showCancelModal = false" class="btn btn-outline">
+          <button 
+            @click="showCancelModal = false" 
+            class="btn btn-primary"
+            :disabled="isCancelling"
+          >
             Keep Subscription
           </button>
-          <button @click="cancelSubscription" class="btn btn-danger">
-            Cancel Subscription
+          <button 
+            @click="cancelSubscription" 
+            class="btn btn-danger"
+            :disabled="isCancelling"
+          >
+            <span v-if="isCancelling" class="loading-spinner"></span>
+            {{ isCancelling ? 'Cancelling...' : 'Cancel Subscription' }}
           </button>
         </div>
       </div>
@@ -704,128 +771,156 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
   }
 }
 
-.current-subscription {
-  margin-bottom: var(--spacing-xxl);
+.current-subscription-notice {
+  margin-bottom: var(--spacing-xl);
   
-  .subscription-card {
-    background: white;
+  .notice-card {
+    background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%);
+    border: 1px solid var(--color-text-lighter);
     border-radius: var(--border-radius-lg);
-    padding: var(--spacing-xl);
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-    max-width: 600px;
-    margin: 0 auto;
-  }
-  
-  .subscription-header {
+    padding: var(--spacing-lg);
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    margin-bottom: var(--spacing-lg);
+    justify-content: space-between;
+    gap: var(--spacing-lg);
     
-    h3 {
-      margin: 0;
-      color: var(--color-text-dark);
-    }
-  }
-  
-  .status-badge {
-    padding: var(--spacing-xs) var(--spacing-md);
-    border-radius: var(--border-radius-sm);
-    font-size: 0.8rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    
-    &.active {
-      background: var(--color-success-bg);
-      color: var(--color-success);
+    @media (max-width: 768px) {
+      flex-direction: column;
+      text-align: center;
+      gap: var(--spacing-md);
     }
     
-    &.cancelling {
-      background: var(--color-warning-bg);
-      color: var(--color-warning);
-    }
-  }
-  
-  .subscription-details {
-    margin-bottom: var(--spacing-lg);
-    
-    .detail-row {
-      display: flex;
-      justify-content: space-between;
-      padding: var(--spacing-sm) 0;
-      border-bottom: 1px solid var(--color-text-lighter);
+    .notice-content {
+      flex: 1;
       
-      &:last-child {
-        border-bottom: none;
-      }
-      
-      .label {
-        color: var(--color-text-light);
-      }
-      
-      .value {
+      h4 {
+        font-size: 1.2rem;
         font-weight: 600;
         color: var(--color-text-dark);
+        margin-bottom: var(--spacing-xs);
       }
-    }
-  }
-}
-
-.usage-stats {
-  margin: var(--spacing-lg) 0;
-  
-  h4 {
-    margin-bottom: var(--spacing-md);
-    color: var(--color-text-dark);
-  }
-  
-  .usage-grid {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-md);
-  }
-  
-  .usage-item {
-    .usage-label {
-      display: block;
-      font-size: 0.9rem;
-      color: var(--color-text-light);
-      margin-bottom: var(--spacing-xs);
-    }
-    
-    .usage-bar {
-      width: 100%;
-      height: 8px;
-      background: var(--color-text-lighter);
-      border-radius: 4px;
-      overflow: hidden;
-      margin-bottom: var(--spacing-xs);
       
-      .usage-fill {
-        height: 100%;
-        background: var(--color-accent);
-        transition: width 0.3s ease;
+      p {
+        color: var(--color-text-light);
+        margin-bottom: var(--spacing-sm);
+      }
+      
+      .status-badge {
+        padding: 4px 8px;
+        border-radius: 8px;
+        font-size: 0.75rem;
+        font-weight: 500;
+        text-transform: capitalize;
         
-        &.premium {
-          background: linear-gradient(90deg, #ffd700, #ffed4e);
+        &.active {
+          background-color: #d1fae5;
+          color: #065f46;
+        }
+        
+        &.cancelled {
+          background-color: #fee2e2;
+          color: #dc2626;
+        }
+        
+        &.past_due {
+          background-color: #fef3c7;
+          color: #92400e;
         }
       }
     }
     
-    .usage-text {
-      font-size: 0.9rem;
-      color: var(--color-text);
+    .notice-actions {
+      display: flex;
+      gap: var(--spacing-sm);
+      
+      @media (max-width: 480px) {
+        flex-direction: column;
+        width: 100%;
+      }
+      
+      .btn-sm {
+        padding: var(--spacing-sm) var(--spacing-md);
+        font-size: 0.875rem;
+      }
     }
   }
 }
 
-.subscription-actions {
-  margin-top: var(--spacing-lg);
+
+// Plans grid
+.plans-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--spacing-lg);
+  margin-top: var(--spacing-xl);
   
-  .cancellation-notice {
-    text-align: center;
-    color: var(--color-warning);
-    font-style: italic;
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+    gap: var(--spacing-md);
+  }
+  
+  @media (max-width: 576px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--spacing-md);
+  }
+}
+
+.plan-card {
+  background: white;
+  border: 2px solid var(--color-text-lighter);
+  border-radius: var(--border-radius-lg);
+  padding: var(--spacing-xl);
+  position: relative;
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  }
+  
+  &.current {
+    border-color: var(--color-success);
+    background: var(--color-success-bg);
+  }
+  
+  &.popular {
+    border-color: var(--color-accent);
+  }
+  
+  &.recommended {
+    border-color: var(--color-primary);
+  }
+  
+  &.disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+  
+  .badge {
+    position: absolute;
+    top: -12px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 4px 12px;
+    border-radius: var(--border-radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    white-space: nowrap;
+    
+    &.popular {
+      background: var(--color-accent);
+      color: white;
+    }
+    
+    &.recommended {
+      background: var(--color-primary);
+      color: white;
+    }
   }
 }
 
@@ -1424,6 +1519,73 @@ const canSelectPlan = (plan: SubscriptionPlan): boolean => {
     
     th, td {
       padding: var(--spacing-sm);
+    }
+  }
+  
+  .usage-stats {
+    .usage-stats-extended {
+      .stats-row {
+        grid-template-columns: repeat(2, 1fr);
+        gap: var(--spacing-sm);
+      }
+      
+      .stat-item {
+        .stat-label {
+          font-size: 0.75rem;
+        }
+        
+        .stat-value {
+          font-size: 1rem;
+        }
+      }
+    }
+  }
+}
+
+@media (max-width: 480px) {
+  .usage-stats {
+    .usage-item {
+      .usage-header {
+        .usage-label {
+          font-size: 0.85rem;
+        }
+        
+        .usage-status {
+          font-size: 0.85rem;
+        }
+      }
+      
+      .usage-bar {
+        height: 8px;
+      }
+      
+      .usage-details {
+        .remaining-text,
+        .limit-text {
+          font-size: 0.8rem;
+        }
+      }
+    }
+    
+    .usage-stats-extended {
+      .stats-row {
+        grid-template-columns: 1fr;
+        gap: var(--spacing-xs);
+      }
+      
+      .stat-item {
+        padding: var(--spacing-sm);
+        background: var(--color-background-alt);
+        border-radius: var(--border-radius-sm);
+        
+        .stat-label {
+          font-size: 0.7rem;
+        }
+        
+        .stat-value {
+          font-size: 0.9rem;
+        }
+      }
     }
   }
 }
